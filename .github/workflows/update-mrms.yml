@@ -14,25 +14,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install GDAL
+      - name: Install system packages
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
+            python3 \
+            python3-pip \
+            python3-numpy \
+            python3-pil \
+            python3-gdal \
             gdal-bin \
-            libgdal-dev \
-            python3-gdal
+            libgdal-dev
+          python3 --version
           gdal_translate --version
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install Python packages
+      - name: Install upload dependencies
         run: |
-          pip install --upgrade pip
-          pip install Pillow boto3
+          python3 -m pip install --break-system-packages --upgrade pip
+          python3 -m pip install --break-system-packages boto3
 
       - name: MRMS → PNG → R2
         env:
@@ -42,15 +41,19 @@ jobs:
           R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
         run: |
-          export PYTHONPATH=/usr/lib/python3/dist-packages:$PYTHONPATH
-          python scripts/mrms_to_png.py
-          
+          python3 scripts/mrms_to_png.py
+
       - name: Print output URL
         if: success()
         env:
           R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
         run: |
           echo "PNG available at: ${R2_PUBLIC_BASE_URL}/mrms_latest.png"
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "MRMS processing failed at $(date -u). Check the logs above."
 
       - name: Report failure
         if: failure()
