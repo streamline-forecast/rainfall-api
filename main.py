@@ -183,7 +183,7 @@ async def trigger_update():
 @app.get("/api/mrms/latest")
 async def get_latest_mrms_product():
     product_name = "MultiSensor_QPE_01H_Pass2"
-    latest_filename = f"{product_name}.latest.grib2.gz"
+    latest_filename = f"MRMS_{product_name}.latest.grib2.gz"
     download_url = f"{MRMS_BASE_URL}{latest_filename}"
 
     try:
