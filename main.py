@@ -1,14 +1,23 @@
-import gzip
-import os
-import tempfile
-from datetime import datetime, timezone, timedelta
+"""
+Rainfall API - FastAPI backend
+Deployed on Render
 
-import httpx
+Provides:
+- Live forecast rainfall from Open-Meteo
+- NOAA MRMS realtime gridded rainfall retrieval
+- Phase 3A overlay preparation endpoint
+"""
+
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime, timezone
+import httpx
+import gzip
+import os
+import re
+import tempfile
 
-
-app = FastAPI(title="Rainfall Forecast API")
+app = FastAPI(title="Rainfall API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,32 +27,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# =========================================================
+# DEFAULT CONFIG
+# =========================================================
+
 DEFAULT_LAT = 29.4241
 DEFAULT_LON = -98.4936
 DEFAULT_LOCATION = "San Antonio, Texas"
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-MRMS_BASE_URL = "https://mrms.ncep.noaa.gov/2D/MultiSensor_QPE_01H_Pass2/"
-MM_TO_INCHES = 1 / 25.4
 
+MRMS_BASE_URL = "https://mrms.ncep.noaa.gov/2D/MultiSensor_QPE_01H_Pass2/"
+MRMS_PRODUCT = "MultiSensor_QPE_01H_Pass2"
+
+
+# =========================================================
+# ROOT
+# =========================================================
 
 @app.get("/")
 async def root():
     return {
         "success": True,
+        "service": "Rainfall API",
         "status": "online",
-        "service": "Rainfall Forecast API",
         "docs": "/docs",
-        "available_endpoints": [
-            "/",
-            "/api/status",
-            "/api/forecast",
-            "/api/trigger-update",
-            "/api/mrms/latest",
-        ],
+        "forecast": "/api/forecast",
+        "mrms_latest": "/api/mrms/latest",
+        "mrms_overlay": "/api/mrms/overlay",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
+
+# =========================================================
+# STATUS
+# =========================================================
 
 @app.api_route("/api/status", methods=["GET", "POST"])
 async def get_status():
@@ -55,51 +73,65 @@ async def get_status():
     }
 
 
+# =========================================================
+# OPEN-METEO FORECAST
+# =========================================================
+
 async def fetch_rainfall(lat: float, lon: float):
-    now_utc = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    observed_start = now_utc - timedelta(hours=24)
-    forecast_end = now_utc + timedelta(hours=48)
+    """
+    Fetch hourly precipitation from Open-Meteo.
+    """
 
     params = {
         "latitude": lat,
         "longitude": lon,
         "hourly": "precipitation",
         "past_days": 1,
-        "forecast_days": 3,
+        "forecast_days": 2,
         "timezone": "UTC",
     }
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(OPEN_METEO_URL, params=params)
         response.raise_for_status()
         data = response.json()
 
-    times = data.get("hourly", {}).get("time", [])
-    precipitation_mm = data.get("hourly", {}).get("precipitation", [])
+    times = data["hourly"]["time"]
+    precip_mm = data["hourly"]["precipitation"]
+
+    now_utc = datetime.now(timezone.utc).replace(
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+
+    now_str = now_utc.strftime("%Y-%m-%dT%H:%M")
 
     observed_mm = 0.0
     forecast_mm = 0.0
     observed_hours = 0
-    forecast_hours = 0
+    forecast_hours_counted = 0
 
-    for time_str, rain_mm in zip(times, precipitation_mm):
-        if rain_mm is None:
-            rain_mm = 0.0
+    for t_str, mm in zip(times, precip_mm):
 
-        dt = datetime.fromisoformat(time_str).replace(tzinfo=timezone.utc)
+        if mm is None:
+            continue
 
-        if observed_start <= dt <= now_utc:
-            observed_mm += rain_mm
+        if t_str <= now_str:
+            observed_mm += mm
             observed_hours += 1
 
-        if now_utc < dt <= forecast_end:
-            forecast_mm += rain_mm
-            forecast_hours += 1
+        else:
+            if forecast_hours_counted < 48:
+                forecast_mm += mm
+                forecast_hours_counted += 1
+
+    MM_TO_INCHES = 1 / 25.4
 
     return {
-        "observedRainfallInches": round(observed_mm * MM_TO_INCHES, 3),
-        "forecastRainfallInches": round(forecast_mm * MM_TO_INCHES, 3),
-        "forecastHours": forecast_hours,
+        "observedRainfallInches": round(observed_mm * MM_TO_INCHES, 2),
+        "forecastRainfallInches": round(forecast_mm * MM_TO_INCHES, 2),
+        "forecastHours": min(forecast_hours_counted, 48),
         "observedWindowHours": observed_hours,
     }
 
@@ -111,6 +143,7 @@ async def get_forecast(
     location: str = Query(default=DEFAULT_LOCATION),
 ):
     try:
+
         rainfall = await fetch_rainfall(lat, lon)
 
         return {
@@ -123,127 +156,241 @@ async def get_forecast(
                 "forecastHours": rainfall["forecastHours"],
                 "source": "Open-Meteo",
                 "note": (
-                    f"Observed rainfall is estimated from the last "
-                    f"{rainfall['observedWindowHours']} hourly precipitation values. "
-                    f"Forecast rainfall is summed from the next "
-                    f"{rainfall['forecastHours']} hourly precipitation values. "
-                    "Data provided by Open-Meteo."
+                    f"Observed: last "
+                    f"{rainfall['observedWindowHours']}h total. "
+                    f"Forecast: next "
+                    f"{rainfall['forecastHours']}h total."
                 ),
             },
         }
 
     except httpx.HTTPError as error:
+
         return {
             "success": False,
             "error": f"Open-Meteo request failed: {str(error)}",
-            "data": {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "location": location,
-                "observedRainfallInches": None,
-                "forecastRainfallInches": None,
-                "forecastHours": 48,
-                "source": "Open-Meteo",
-                "note": "Failed to retrieve live rainfall data.",
-            },
+            "data": None,
         }
 
     except Exception as error:
+
         return {
             "success": False,
             "error": str(error),
-            "data": {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "location": location,
-                "observedRainfallInches": None,
-                "forecastRainfallInches": None,
-                "forecastHours": 48,
-                "source": "Open-Meteo",
-                "note": "Unexpected error retrieving rainfall data.",
-            },
+            "data": None,
         }
 
 
+# =========================================================
+# UPDATE TRIGGER
+# =========================================================
+
 @app.post("/api/trigger-update")
 async def trigger_update():
+
     return {
         "success": True,
-        "message": "Update triggered. Open-Meteo data is fetched live on each /api/forecast request.",
-        "status": "update_started",
+        "message": (
+            "Update triggered. "
+            "Open-Meteo data is fetched live on each request."
+        ),
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "next_steps": [
-            "Pull observed rainfall",
-            "Pull forecast rainfall",
-            "Retrieve MRMS raster data",
-            "Generate raster output",
-            "Update latest forecast layer",
-        ],
     }
 
 
+# =========================================================
+# MRMS LATEST DOWNLOAD
+# =========================================================
+
 @app.get("/api/mrms/latest")
-async def get_latest_mrms_product():
-    product_name = "MultiSensor_QPE_01H_Pass2"
-    latest_filename = f"MRMS_{product_name}.latest.grib2.gz"
-    download_url = f"{MRMS_BASE_URL}{latest_filename}"
+async def mrms_latest():
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.get(download_url)
-            response.raise_for_status()
 
-        gz_path = os.path.join(tempfile.gettempdir(), latest_filename)
+        # Fetch directory listing
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            follow_redirects=True,
+        ) as client:
 
-        with open(gz_path, "wb") as file:
-            file.write(response.content)
+            directory_response = await client.get(MRMS_BASE_URL)
+            directory_response.raise_for_status()
 
-        compressed_file_size_bytes = os.path.getsize(gz_path)
+        # Parse timestamped filenames
+        pattern = re.compile(
+            r'href__=\"(MRMS_' +
+            re.escape(MRMS_PRODUCT) +
+            r'_\d{2}\.\d{2}_\d{8}-\d{6}\.grib2\.gz)\"'
+        )
 
-        grib2_filename = latest_filename.replace(".gz", "")
-        grib2_path = os.path.join(tempfile.gettempdir(), grib2_filename)
+        matches = pattern.findall(directory_response.text)
 
-        with gzip.open(gz_path, "rb") as source:
-            with open(grib2_path, "wb") as target:
-                target.write(source.read())
+        if not matches:
+            return {
+                "success": False,
+                "error": "No MRMS files found in directory listing.",
+            }
 
-        grib2_file_size_bytes = os.path.getsize(grib2_path)
+        newest_filename = sorted(matches)[-1]
 
+        source_url = MRMS_BASE_URL + newest_filename
+
+        gz_path = f"/tmp/{newest_filename}"
+
+        grib2_filename = newest_filename.replace(".gz", "")
+
+        grib2_path = f"/tmp/{grib2_filename}"
+
+        # Download file
+        async with httpx.AsyncClient(
+            timeout=120.0,
+            follow_redirects=True,
+        ) as client:
+
+            download_response = await client.get(source_url)
+            download_response.raise_for_status()
+
+            with open(gz_path, "wb") as file:
+                file.write(download_response.content)
+
+        gz_size = os.path.getsize(gz_path)
+
+        # Decompress
+        with gzip.open(gz_path, "rb") as gz_in:
+            with open(grib2_path, "wb") as grib_out:
+                grib_out.write(gz_in.read())
+
+        grib2_size = os.path.getsize(grib2_path)
+
+        # Cleanup .gz
         os.remove(gz_path)
 
         return {
             "success": True,
-            "product": product_name,
-            "source_url": download_url,
-            "downloaded_filename": latest_filename,
+            "product": MRMS_PRODUCT,
+            "source_url": source_url,
+            "downloaded_filename": newest_filename,
             "grib2_filename": grib2_filename,
-            "compressed_file_size_bytes": compressed_file_size_bytes,
-            "grib2_file_size_bytes": grib2_file_size_bytes,
+            "file_size_bytes": grib2_size,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "note": "Latest MRMS 1-hour observed rainfall product downloaded and decompressed to temporary server storage.",
+            "note": (
+                "Downloaded and decompressed latest NOAA MRMS "
+                "1-hour observed rainfall grid."
+            ),
         }
 
-    except httpx.HTTPStatusError as error:
-        return {
-            "success": False,
-            "product": product_name,
-            "source_url": download_url,
-            "error": f"HTTP error downloading MRMS data: {error.response.status_code}",
-            "note": "Check the MRMS source URL or server availability.",
-        }
+    except httpx.HTTPError as error:
 
-    except httpx.RequestError as error:
         return {
             "success": False,
-            "product": product_name,
-            "source_url": download_url,
-            "error": f"Network error downloading MRMS data: {str(error)}",
-            "note": "Check network connectivity or MRMS server availability.",
+            "error": f"HTTP error fetching MRMS data: {str(error)}",
         }
 
     except Exception as error:
+
         return {
             "success": False,
-            "product": product_name,
-            "source_url": download_url,
             "error": str(error),
-            "note": "Unexpected error retrieving or decompressing MRMS data.",
+        }
+
+
+# =========================================================
+# MRMS OVERLAY PREP
+# =========================================================
+
+@app.get("/api/mrms/overlay")
+async def mrms_overlay():
+
+    """
+    Phase 3A:
+    Download and verify MRMS GRIB2 file for future overlay conversion.
+    """
+
+    try:
+
+        latest_filename = (
+            f"MRMS_{MRMS_PRODUCT}.latest.grib2.gz"
+        )
+
+        download_url = f"{MRMS_BASE_URL}{latest_filename}"
+
+        # Download file
+        async with httpx.AsyncClient(
+            timeout=120.0,
+            follow_redirects=True,
+        ) as client:
+
+            response = await client.get(download_url)
+            response.raise_for_status()
+
+        gz_path = os.path.join(
+            tempfile.gettempdir(),
+            latest_filename,
+        )
+
+        with open(gz_path, "wb") as file:
+            file.write(response.content)
+
+        gz_size = os.path.getsize(gz_path)
+
+        # Decompress
+        grib2_filename = latest_filename.replace(".gz", "")
+
+        grib2_path = os.path.join(
+            tempfile.gettempdir(),
+            grib2_filename,
+        )
+
+        with gzip.open(gz_path, "rb") as gz_in:
+            with open(grib2_path, "wb") as grib_out:
+                grib_out.write(gz_in.read())
+
+        grib2_size = os.path.getsize(grib2_path)
+
+        # Cleanup .gz
+        os.remove(gz_path)
+
+        return {
+            "success": True,
+            "product": MRMS_PRODUCT,
+            "download_url": download_url,
+            "grib2_filename": grib2_filename,
+            "compressed_file_size_bytes": gz_size,
+            "grib2_file_size_bytes": grib2_size,
+            "grib2_file_exists": os.path.exists(grib2_path),
+            "conversion_status": "pending_gdal",
+            "recommended_next_step": (
+                "Phase 3B: Convert GRIB2 to GeoTIFF or PNG overlay."
+            ),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "note": (
+                "GRIB2 file downloaded and verified successfully."
+            ),
+        }
+
+    except httpx.HTTPStatusError as error:
+
+        return {
+            "success": False,
+            "conversion_status": "failed",
+            "error": (
+                f"HTTP error downloading MRMS data: "
+                f"{error.response.status_code}"
+            ),
+        }
+
+    except httpx.RequestError as error:
+
+        return {
+            "success": False,
+            "conversion_status": "failed",
+            "error": f"Network error: {str(error)}",
+        }
+
+    except Exception as error:
+
+        return {
+            "success": False,
+            "conversion_status": "failed",
+            "error": str(error),
         }
