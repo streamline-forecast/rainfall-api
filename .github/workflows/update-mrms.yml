@@ -2,9 +2,8 @@ name: Update MRMS Rainfall Overlay
 
 on:
   schedule:
-    # Run at :10 past every hour — MRMS data is typically posted by :05
     - cron: "10 * * * *"
-  workflow_dispatch:  # allow manual trigger from the Actions UI
+  workflow_dispatch:
 
 jobs:
   update-mrms:
@@ -12,15 +11,9 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      # -----------------------------------------------------------------------
-      # 1. Checkout
-      # -----------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # -----------------------------------------------------------------------
-      # 2. Install GDAL system tools
-      # -----------------------------------------------------------------------
       - name: Install GDAL
         run: |
           sudo apt-get update -qq
@@ -30,41 +23,28 @@ jobs:
             python3-gdal
           gdal_translate --version
 
-      # -----------------------------------------------------------------------
-      # 3. Set up Python
-      # -----------------------------------------------------------------------
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
 
-      # -----------------------------------------------------------------------
-      # 4. Install Python dependencies
-      # -----------------------------------------------------------------------
       - name: Install Python packages
         run: |
           pip install --upgrade pip
           pip install numpy Pillow boto3
-          # Use the system GDAL Python bindings installed by apt above
-          pip install gdal==$(gdal-config --version)
 
-      # -----------------------------------------------------------------------
-      # 5. Run the processing script
-      # -----------------------------------------------------------------------
       - name: MRMS → PNG → R2
         env:
-          R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          PYTHONPATH: /usr/lib/python3/dist-packages
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_NAME:       ${{ secrets.R2_BUCKET_NAME }}
-          R2_PUBLIC_BASE_URL:   ${{ secrets.R2_PUBLIC_BASE_URL }}
-          R2_ENDPOINT_URL:      ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
         run: |
           python scripts/mrms_to_png.py
 
-      # -----------------------------------------------------------------------
-      # 6. Print the public URL on success
-      # -----------------------------------------------------------------------
       - name: Print output URL
         if: success()
         env:
@@ -72,9 +52,6 @@ jobs:
         run: |
           echo "PNG available at: ${R2_PUBLIC_BASE_URL}/mrms_latest.png"
 
-      # -----------------------------------------------------------------------
-      # 7. Report failure
-      # -----------------------------------------------------------------------
       - name: Report failure
         if: failure()
         run: |
