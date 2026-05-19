@@ -45,19 +45,55 @@ MRMS_PRODUCT = "MultiSensor_QPE_01H_Pass2"
 # ROOT
 # =========================================================
 
-@app.get("/")
-async def root():
-    return {
-        "success": True,
-        "service": "Rainfall API",
-        "status": "online",
-        "docs": "/docs",
-        "forecast": "/api/forecast",
-        "mrms_latest": "/api/mrms/latest",
-        "mrms_overlay": "/api/mrms/overlay",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
+@app.get("/api/mrms/latest")
+async def mrms_latest():
+    try:
+        latest_filename = f"MRMS_{MRMS_PRODUCT}.latest.grib2.gz"
+        source_url = f"{MRMS_BASE_URL}{latest_filename}"
 
+        gz_path = f"/tmp/{latest_filename}"
+        grib2_filename = latest_filename.replace(".gz", "")
+        grib2_path = f"/tmp/{grib2_filename}"
+
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            response = await client.get(source_url)
+            response.raise_for_status()
+
+            with open(gz_path, "wb") as file:
+                file.write(response.content)
+
+        gz_size = os.path.getsize(gz_path)
+
+        with gzip.open(gz_path, "rb") as gz_in:
+            with open(grib2_path, "wb") as grib_out:
+                grib_out.write(gz_in.read())
+
+        grib2_size = os.path.getsize(grib2_path)
+        os.remove(gz_path)
+
+        return {
+            "success": True,
+            "product": MRMS_PRODUCT,
+            "source_url": source_url,
+            "downloaded_filename": latest_filename,
+            "grib2_filename": grib2_filename,
+            "compressed_file_size_bytes": gz_size,
+            "grib2_file_size_bytes": grib2_size,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "note": "Downloaded and decompressed latest NOAA MRMS 1-hour observed rainfall grid.",
+        }
+
+    except httpx.HTTPError as error:
+        return {
+            "success": False,
+            "error": f"HTTP error fetching MRMS data: {str(error)}",
+        }
+
+    except Exception as error:
+        return {
+            "success": False,
+            "error": str(error),
+        }
 
 # =========================================================
 # STATUS
