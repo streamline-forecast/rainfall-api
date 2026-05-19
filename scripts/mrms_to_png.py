@@ -122,7 +122,7 @@ def find_latest_filenames(n: int = NUM_HOURS) -> list:
         html = resp.read().decode()
 
     pattern = re.compile(
-        r'href__=\"(MRMS_' + re.escape(MRMS_PRODUCT)
+        r'href=\"(MRMS_' + re.escape(MRMS_PRODUCT)
         + r'_\\d{2}\\.\\d{2}_(\\d{8}-\\d{6})\\.grib2\\.gz)\"'
     )
     matches = pattern.findall(html)   # list of (filename, timestamp_str)
