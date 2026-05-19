@@ -117,17 +117,30 @@ def upload_file(s3, local_path: str, key: str, content_type: str) -> str:
 # Step 1: Fetch directory listing → sorted list of up-to-24 filenames
 # ---------------------------------------------------------------------------
 def find_latest_filenames(n: int = NUM_HOURS) -> list:
-    print(f"Fetching MRMS directory listing…")
+    print("Fetching MRMS directory listing…")
+
     with urllib.request.urlopen(MRMS_BASE_URL, timeout=30) as resp:
         html = resp.read().decode()
 
     pattern = re.compile(
-        r'href=\"(MRMS_' + re.escape(MRMS_PRODUCT)
-        + r'_\\d{2}\\.\\d{2}_(\\d{8}-\\d{6})\\.grib2\\.gz)\"'
+        r'MRMS_MultiSensor_QPE_01H_Pass2_00\.00_\d{8}-\d{6}\.grib2\.gz'
     )
-    matches = pattern.findall(html)   # list of (filename, timestamp_str)
+
+    matches = pattern.findall(html)
+
+    matches = sorted(set(matches))
+
     if not matches:
         raise RuntimeError("No .grib2.gz files found in MRMS directory listing.")
+
+    latest = matches[-n:]
+
+    print(f"Found {len(latest)} MRMS files")
+
+    for f in latest:
+        print(f"  {f}")
+
+    return latest
 
     # Sort by embedded timestamp (already lexicographically sortable)
     matches.sort(key=lambda x: x[1])
