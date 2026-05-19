@@ -1,61 +1,81 @@
-name: Update MRMS Rainfall Overlay
+name: Update MRMS 24-Hour Rolling Archive
 
 on:
   schedule:
+    # Run at :10 past every hour — MRMS data is typically posted by :05
     - cron: "10 * * * *"
-  workflow_dispatch:
+  workflow_dispatch:  # manual trigger from the Actions UI
 
 jobs:
   update-mrms:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60      # 24 files takes longer than the MVP single-file run
 
     steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install system packages
+      # -----------------------------------------------------------------------
+      # 2. Install GDAL system tools
+      # -----------------------------------------------------------------------
+      - name: Install GDAL
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            python3 \
-            python3-pip \
-            python3-numpy \
-            python3-pil \
-            python3-gdal \
             gdal-bin \
-            libgdal-dev
-          python3 --version
+            libgdal-dev \
+            python3-gdal
           gdal_translate --version
 
-      - name: Install upload dependencies
-        run: |
-          python3 -m pip install --break-system-packages --upgrade pip
-          python3 -m pip install --break-system-packages boto3
+      # -----------------------------------------------------------------------
+      # 3. Set up Python
+      # -----------------------------------------------------------------------
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
 
-      - name: MRMS → PNG → R2
+      # -----------------------------------------------------------------------
+      # 4. Install Python dependencies
+      # -----------------------------------------------------------------------
+      - name: Install Python packages
+        run: |
+          pip install --upgrade pip
+          pip install numpy Pillow boto3
+          pip install gdal==$(gdal-config --version)
+
+      # -----------------------------------------------------------------------
+      # 5. Run the 24-hour archive script
+      # -----------------------------------------------------------------------
+      - name: MRMS 24-hr → PNG + GeoTIFF + GRIB2 → R2
         env:
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
-          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET_NAME:       ${{ secrets.R2_BUCKET_NAME }}
+          R2_PUBLIC_BASE_URL:   ${{ secrets.R2_PUBLIC_BASE_URL }}
+          R2_ENDPOINT_URL:      ${{ secrets.R2_ENDPOINT_URL }}
         run: |
-          python3 scripts/mrms_to_png.py
+          python scripts/mrms_to_png.py
 
-      - name: Print output URL
+      # -----------------------------------------------------------------------
+      # 6. Print output URLs on success
+      # -----------------------------------------------------------------------
+      - name: Print output URLs
         if: success()
         env:
           R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
         run: |
-          echo "PNG available at: ${R2_PUBLIC_BASE_URL}/mrms_latest.png"
+          echo "Index  : ${R2_PUBLIC_BASE_URL}/mrms/hourly/index.json"
+          echo "Latest : ${R2_PUBLIC_BASE_URL}/mrms_latest.png"
 
+      # -----------------------------------------------------------------------
+      # 7. Report failure
+      # -----------------------------------------------------------------------
       - name: Report failure
         if: failure()
         run: |
-          echo "MRMS processing failed at $(date -u). Check the logs above."
-
-      - name: Report failure
-        if: failure()
-        run: |
-          echo "MRMS processing failed at $(date -u). Check the logs above."
+          echo "MRMS 24-hr archive failed at $(date -u). Check logs above."
