@@ -36,3 +36,17 @@ def get_forecast():
         "success": True,
         "data": rainfall_data
     }
+    @app.get("/api/status")
+def status():
+    return {
+        "success": True,
+        "status": "online",
+        "service": "Rainfall API"
+    }
+
+@app.post("/api/trigger-update")
+def trigger_update():
+    return {
+        "success": True,
+        "message": "Rainfall update triggered"
+    }
