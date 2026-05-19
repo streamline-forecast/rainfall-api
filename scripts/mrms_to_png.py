@@ -1,30 +1,8 @@
 #!/usr/bin/env python3
-"""
-scripts/mrms_to_png.py
-Phase 3B MVP — MRMS GRIB2 → Transparent PNG → Cloudflare R2
-
-Steps:
-  1. Find latest MRMS_MultiSensor_QPE_01H_Pass2 file from NOAA directory
-  2. Download + decompress .grib2.gz → .grib2
-  3. Convert .grib2 → GeoTIFF (EPSG:4326) using gdal_translate + gdalwarp
-  4. Read GeoTIFF with GDAL Python bindings → numpy array
-  5. Apply rainfall colormap → transparent RGBA PNG
-  6. Upload mrms_latest.png to Cloudflare R2
-
-Required env vars:
-  R2_ACCESS_KEY_ID
-  R2_SECRET_ACCESS_KEY
-  R2_BUCKET_NAME
-  R2_PUBLIC_BASE_URL    e.g. https://pub-xxx.r2.dev
-  R2_ENDPOINT_URL       e.g. https://<account_id>.r2.cloudflarestorage.com
-"""
 
 import os
-import re
 import gzip
-import json
 import tempfile
-import datetime
 import subprocess
 import urllib.request
 
@@ -33,176 +11,163 @@ from PIL import Image
 import boto3
 from botocore.config import Config
 
-# ---------------------------------------------------------------------------
-# MRMS source
-# ---------------------------------------------------------------------------
-MRMS_BASE_URL = "https://mrms.ncep.noaa.gov/2D/MultiSensor_QPE_01H_Pass2/"
-MRMS_PRODUCT  = "MultiSensor_QPE_01H_Pass2"
 
-# R2 config from environment
-R2_ACCESS_KEY_ID      = os.environ["R2_ACCESS_KEY_ID"]
+MRMS_BASE_URL = "https://mrms.ncep.noaa.gov/2D/MultiSensor_QPE_01H_Pass2/"
+MRMS_PRODUCT = "MultiSensor_QPE_01H_Pass2"
+MRMS_FILENAME = f"MRMS_{MRMS_PRODUCT}.latest.grib2.gz"
+
+R2_ACCESS_KEY_ID = os.environ["R2_ACCESS_KEY_ID"]
 R2_SECRET_ACCESS_KEY = os.environ["R2_SECRET_ACCESS_KEY"]
-R2_BUCKET_NAME       = os.environ["R2_BUCKET_NAME"]
-R2_PUBLIC_BASE_URL   = os.environ["R2_PUBLIC_BASE_URL"].rstrip("/")
-R2_ENDPOINT_URL      = os.environ["R2_ENDPOINT_URL"].rstrip("/")
+R2_BUCKET_NAME = os.environ["R2_BUCKET_NAME"]
+R2_PUBLIC_BASE_URL = os.environ["R2_PUBLIC_BASE_URL"].rstrip("/")
+R2_ENDPOINT_URL = os.environ["R2_ENDPOINT_URL"].rstrip("/")
 
 OUTPUT_KEY = "mrms_latest.png"
 
-# ---------------------------------------------------------------------------
-# Rainfall colormap (mm input thresholds → RGBA)
-# Zero/nodata = fully transparent
-# ---------------------------------------------------------------------------
+
 COLORMAP_MM = [
-    (0.0,   (0,   0,   0,   0)),     # transparent (no rain)
-    (0.254, (100, 200, 255, 160)),   # trace  (~0.01 in)
-    (6.35,  (50,  150, 255, 190)),   # 0.25 in
-    (12.7,  (30,  80,  220, 210)),   # 0.50 in
-    (25.4,  (80,  30,  200, 220)),   # 1.00 in
-    (38.1,  (160, 20,  180, 230)),   # 1.50 in
-    (63.5,  (220, 30,  80,  235)),   # 2.50 in
-    (101.6, (180, 10,  10,  245)),   # 4.00 in
+    (0.0, (0, 0, 0, 0)),
+    (0.254, (100, 200, 255, 160)),
+    (6.35, (50, 150, 255, 190)),
+    (12.7, (30, 80, 220, 210)),
+    (25.4, (80, 30, 200, 220)),
+    (38.1, (160, 20, 180, 230)),
+    (63.5, (220, 30, 80, 235)),
+    (101.6, (180, 10, 10, 245)),
     (float("inf"), (100, 0, 0, 255)),
 ]
 
 
-def mm_to_rgba(data_mm: np.ndarray) -> np.ndarray:
-    h, w = data_mm.shape
-    rgba = np.zeros((h, w, 4), dtype=np.uint8)
-    thresholds = [t for t, _ in COLORMAP_MM]
-    colors     = [c for _, c in COLORMAP_MM]
-    for i in range(len(thresholds) - 1):
-        lo, hi = thresholds[i], thresholds[i + 1]
-        mask = (data_mm >= lo) & (data_mm < hi)
-        rgba[mask] = colors[i]
-    return rgba
+def download_and_decompress(tmpdir: str) -> str:
+    url = MRMS_BASE_URL + MRMS_FILENAME
+    gz_path = os.path.join(tmpdir, MRMS_FILENAME)
+    grib2_path = gz_path.replace(".gz", "")
 
+    print(f"Downloading {url}")
 
-# ---------------------------------------------------------------------------
-# Step 1: Find latest filename
-# ---------------------------------------------------------------------------
-def find_latest_filename() -> str:
-    print("Fetching MRMS directory listing…")
-    with urllib.request.urlopen(MRMS_BASE_URL, timeout=30) as resp:
-        html = resp.read().decode()
+    with urllib.request.urlopen(url, timeout=120) as response:
+        with open(gz_path, "wb") as file:
+            file.write(response.read())
 
-    pattern = re.compile(
-        r'href__="(MRMS_' + re.escape(MRMS_PRODUCT) + r'_\d{2}\.\d{2}_\d{8}-\d{6}\.grib2\.gz)"'
-    )
-    matches = pattern.findall(html)
-    if not matches:
-        raise RuntimeError("No .grib2.gz files found in MRMS directory listing.")
+    print(f"Downloaded .gz size: {os.path.getsize(gz_path):,} bytes")
 
-    latest = sorted(matches)[-1]
-    print(f"  Latest: {latest}")
-    return latest
+    with gzip.open(gz_path, "rb") as gz_in:
+        with open(grib2_path, "wb") as grib_out:
+            grib_out.write(gz_in.read())
 
-
-# ---------------------------------------------------------------------------
-# Step 2: Download + decompress
-# ---------------------------------------------------------------------------
-def download_and_decompress(filename: str, tmpdir: str) -> str:
-    url       = MRMS_BASE_URL + filename
-    gz_path   = os.path.join(tmpdir, filename)
-    grib2_path = gz_path[:-3]  # strip .gz
-
-    print(f"Downloading {url} …")
-    with urllib.request.urlopen(url, timeout=120) as resp:
-        with open(gz_path, "wb") as f:
-            f.write(resp.read())
-    print(f"  {os.path.getsize(gz_path):,} bytes (.gz)")
-
-    print("Decompressing…")
-    with gzip.open(gz_path, "rb") as gz_in, open(grib2_path, "wb") as out:
-        out.write(gz_in.read())
-    print(f"  {os.path.getsize(grib2_path):,} bytes (.grib2)")
+    print(f"Decompressed GRIB2 size: {os.path.getsize(grib2_path):,} bytes")
 
     os.remove(gz_path)
+
     return grib2_path
 
 
-# ---------------------------------------------------------------------------
-# Step 3: GRIB2 → GeoTIFF via GDAL CLI (most reliable on CI)
-# ---------------------------------------------------------------------------
 def grib2_to_geotiff(grib2_path: str, tmpdir: str) -> str:
     tiff_path = os.path.join(tmpdir, "mrms.tif")
 
-    # gdal_translate: extract band 1, output GeoTIFF
     cmd = [
         "gdal_translate",
-        "-of", "GTiff",
-        "-b", "1",
+        "-of",
+        "GTiff",
+        "-b",
+        "1",
         grib2_path,
         tiff_path,
     ]
-    print("Running:", " ".join(cmd))
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    print(result.stdout[-500:] if result.stdout else "")
-    if result.returncode != 0:
-        print("STDERR:", result.stderr[-1000:])
-        raise RuntimeError(f"gdal_translate failed (exit {result.returncode})")
 
-    print(f"  GeoTIFF: {os.path.getsize(tiff_path):,} bytes")
+    print("Running:", " ".join(cmd))
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.stdout:
+        print(result.stdout[-1000:])
+
+    if result.returncode != 0:
+        print(result.stderr[-2000:])
+        raise RuntimeError(f"gdal_translate failed with exit code {result.returncode}")
+
+    print(f"GeoTIFF size: {os.path.getsize(tiff_path):,} bytes")
+
     return tiff_path
 
 
-# ---------------------------------------------------------------------------
-# Step 4: Read GeoTIFF → numpy array (mm, nodata masked to 0)
-# ---------------------------------------------------------------------------
 def geotiff_to_array(tiff_path: str):
     from osgeo import gdal
+
     gdal.UseExceptions()
 
-    ds = gdal.Open(tiff_path)
-    band = ds.GetRasterBand(1)
+    dataset = gdal.Open(tiff_path)
+    if dataset is None:
+        raise RuntimeError("GDAL could not open GeoTIFF.")
+
+    band = dataset.GetRasterBand(1)
     data = band.ReadAsArray().astype(np.float32)
     nodata = band.GetNoDataValue()
 
-    gt = ds.GetGeoTransform()
-    # gt: (west, xres, 0, north, 0, -yres)
-    west  = gt[0]
-    north = gt[3]
-    xres  = gt[1]
-    yres  = abs(gt[5])
-    nrows, ncols = data.shape
-    south = north - nrows * yres
-    east  = west  + ncols * xres
+    transform = dataset.GetGeoTransform()
 
-    ds = None
+    west = transform[0]
+    north = transform[3]
+    xres = transform[1]
+    yres = abs(transform[5])
 
-    # Mask nodata
+    rows, cols = data.shape
+
+    south = north - rows * yres
+    east = west + cols * xres
+
+    dataset = None
+
     if nodata is not None:
         data[data == nodata] = 0.0
+
+    data[np.isnan(data)] = 0.0
     data[data < 0] = 0.0
 
-    print(f"  Array {nrows}×{ncols}, bounds W={west:.3f} E={east:.3f} S={south:.3f} N={north:.3f}")
-    print(f"  mm range: {data.min():.3f} – {data.max():.3f}, nonzero={(data > 0.1).sum():,}")
+    print(f"Raster size: {cols} x {rows}")
+    print(f"Bounds: south={south}, west={west}, north={north}, east={east}")
+    print(f"Rainfall range mm: min={data.min():.3f}, max={data.max():.3f}")
 
     bounds_leaflet = [[south, west], [north, east]]
+
     return data, bounds_leaflet
 
 
-# ---------------------------------------------------------------------------
-# Step 5: numpy (mm) → transparent RGBA PNG
-# ---------------------------------------------------------------------------
+def mm_to_rgba(data_mm: np.ndarray) -> np.ndarray:
+    height, width = data_mm.shape
+    rgba = np.zeros((height, width, 4), dtype=np.uint8)
+
+    for index in range(len(COLORMAP_MM) - 1):
+        low = COLORMAP_MM[index][0]
+        high = COLORMAP_MM[index + 1][0]
+        color = COLORMAP_MM[index][1]
+
+        mask = (data_mm >= low) & (data_mm < high)
+        rgba[mask] = color
+
+    return rgba
+
+
 def array_to_png(data_mm: np.ndarray, png_path: str):
-    print("Rendering PNG…")
+    print("Rendering transparent rainfall PNG")
+
     rgba = mm_to_rgba(data_mm)
+    image = Image.fromarray(rgba, mode="RGBA")
 
-    img = Image.fromarray(rgba, mode="RGBA")
+    width, height = image.size
 
-    # Downsample for reasonable file size (MRMS CONUS grid is ~3500×7000)
-    w, h = img.size
-    if w > 2000:
-        img = img.resize((w // 4, h // 4), Image.LANCZOS)
-        print(f"  Downsampled to {img.size}")
+    if width > 2200:
+        new_width = width // 4
+        new_height = height // 4
+        image = image.resize((new_width, new_height), Image.LANCZOS)
+        print(f"Downsampled PNG to {new_width} x {new_height}")
 
-    img.save(png_path, "PNG", optimize=True)
-    print(f"  Saved: {png_path} ({os.path.getsize(png_path):,} bytes)")
+    image.save(png_path, "PNG", optimize=True)
+
+    print(f"Saved PNG: {png_path}")
+    print(f"PNG size: {os.path.getsize(png_path):,} bytes")
 
 
-# ---------------------------------------------------------------------------
-# Step 6: Upload to Cloudflare R2
-# ---------------------------------------------------------------------------
 def upload_to_r2(png_path: str) -> str:
     s3 = boto3.client(
         "s3",
@@ -213,7 +178,8 @@ def upload_to_r2(png_path: str) -> str:
         region_name="auto",
     )
 
-    print(f"Uploading to R2 bucket '{R2_BUCKET_NAME}' as '{OUTPUT_KEY}'…")
+    print(f"Uploading {OUTPUT_KEY} to R2 bucket {R2_BUCKET_NAME}")
+
     s3.upload_file(
         png_path,
         R2_BUCKET_NAME,
@@ -225,28 +191,27 @@ def upload_to_r2(png_path: str) -> str:
     )
 
     public_url = f"{R2_PUBLIC_BASE_URL}/{OUTPUT_KEY}"
-    print(f"  Public URL: {public_url}")
+
+    print(f"Public URL: {public_url}")
+
     return public_url
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def main():
     with tempfile.TemporaryDirectory() as tmpdir:
-        gz_filename = find_latest_filename()
-        grib2_path  = download_and_decompress(gz_filename, tmpdir)
-        tiff_path   = grib2_to_geotiff(grib2_path, tmpdir)
+        grib2_path = download_and_decompress(tmpdir)
+        tiff_path = grib2_to_geotiff(grib2_path, tmpdir)
+
         data_mm, bounds = geotiff_to_array(tiff_path)
 
-        png_path = os.path.join(tmpdir, "mrms_latest.png")
+        png_path = os.path.join(tmpdir, OUTPUT_KEY)
         array_to_png(data_mm, png_path)
 
         public_url = upload_to_r2(png_path)
 
-    print("\n=== Phase 3B MVP complete ===")
-    print(f"  PNG URL : {public_url}")
-    print(f"  Bounds  : {bounds}")
+    print("MRMS PNG pipeline complete")
+    print(f"PNG URL: {public_url}")
+    print(f"Leaflet bounds: {bounds}")
 
 
 if __name__ == "__main__":
