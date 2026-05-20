@@ -1,49 +1,58 @@
-name: Update Combined 42h Accumulation
+name: Update Combined 42-Hour Accumulation
 
 on:
+  workflow_dispatch:
   schedule:
-    # Run every 30 minutes at :15 and :45 (offset from other workflows)
-    - cron: '15,45 * * * *'
-  workflow_dispatch: # Allows manual triggering from GitHub UI
+    - cron: "45 * * * *"
 
 jobs:
-  build_and_upload:
+  update-combined-accum:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    # Permissions for R2 upload
-    permissions:
-      contents: read # Allow checkout
-      id-token: write # Required for OIDC authentication if using AWS role, but not for direct keys
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10' # Ensure a compatible Python version
-
-      - name: Install dependencies
+      - name: Install system packages
         run: |
-          python -m pip install --upgrade pip
-          pip install gdal==$(gdal-config --version | awk -F'.' '{print $1"."$2}') # Install GDAL matching system GDAL
-          pip install boto3 requests numpy
-        env:
-          # Ensure gdal-bin is installed for gdal-config to work
-          DEBIAN_FRONTEND: noninteractive
-          PYTHON_IMAGE_EXTRA_PACKAGES: gdal-bin libgdal-dev
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            python3 \
+            python3-pip \
+            python3-numpy \
+            python3-pil \
+            python3-gdal \
+            gdal-bin \
+            libgdal-dev
+          python3 --version
+          gdal_translate --version
 
-      - name: Print GDAL version
-        run: gdal-config --version || echo "GDAL not found or gdal-config failed."
+      - name: Install upload dependencies
+        run: |
+          python3 -m pip install --break-system-packages --upgrade pip
+          python3 -m pip install --break-system-packages boto3
 
-      - name: Execute combined accumulation script
-        run: python scripts/build_combined_accum.py
+      - name: Build combined 42-hour accumulation
         env:
-          # R2 Credentials from GitHub Secrets
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
           R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          python3 scripts/build_combined_accum.py
+
+      - name: Print output URLs
+        if: success()
+        env:
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+        run: |
+          echo "Combined Index: ${R2_PUBLIC_BASE_URL}/combined/accum/index.json"
+          echo "Combined PNG  : ${R2_PUBLIC_BASE_URL}/combined/accum/png/combined_42h.png"
+          echo "Combined TIF  : ${R2_PUBLIC_BASE_URL}/combined/accum/geotiff/combined_42h.tif"
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "Combined 42-hour accumulation failed at $(date -u). Check logs above."
