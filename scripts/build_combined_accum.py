@@ -41,15 +41,33 @@ COLORMAP_MM = [
 
 
 def fetch_json(url):
-    with urllib.request.urlopen(url, timeout=60) as response:
-        return json.loads(response.read().decode("utf-8"))
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 GitHubActions-RainfallPipeline/1.0",
+            "Accept": "application/json,text/plain,*/*",
+        },
+    )
 
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 def download_file(url, path):
     print(f"Downloading {url}")
-    urllib.request.urlretrieve(url, path)
-    return path
 
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 GitHubActions-RainfallPipeline/1.0",
+            "Accept": "*/*",
+        },
+    )
+
+    with urllib.request.urlopen(request, timeout=300) as response:
+        with open(path, "wb") as file:
+            file.write(response.read())
+
+    return path
 
 def make_s3():
     return boto3.client(
