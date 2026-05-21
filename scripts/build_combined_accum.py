@@ -48,13 +48,12 @@ def fetch_json(url):
             "Accept": "application/json,text/plain,*/*",
         },
     )
-
     with urllib.request.urlopen(request, timeout=60) as response:
         return json.loads(response.read().decode("utf-8"))
 
+
 def download_file(url, path):
     print(f"Downloading {url}")
-
     request = urllib.request.Request(
         url,
         headers={
@@ -62,12 +61,11 @@ def download_file(url, path):
             "Accept": "*/*",
         },
     )
-
     with urllib.request.urlopen(request, timeout=300) as response:
         with open(path, "wb") as file:
             file.write(response.read())
-
     return path
+
 
 def make_s3():
     return boto3.client(
@@ -95,22 +93,25 @@ def mm_to_rgba(data_mm):
     h, w = data_mm.shape
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
 
+    valid = np.isfinite(data_mm) & (data_mm >= 0) & (data_mm < 2000)
+
     for i in range(len(COLORMAP_MM) - 1):
         lo, color = COLORMAP_MM[i]
         hi, _ = COLORMAP_MM[i + 1]
-        rgba[(data_mm >= lo) & (data_mm < hi)] = color
+        mask = valid & (data_mm >= lo) & (data_mm < hi)
+        rgba[mask] = color
 
     return rgba
 
 
 def array_to_png_bytes(data_mm):
     rgba = mm_to_rgba(data_mm)
-
     img = Image.fromarray(rgba, mode="RGBA")
+
+    print("PNG native dimensions:", img.size)
 
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
-
     return buf.getvalue()
 
 
@@ -142,7 +143,6 @@ def read_raster_array(path):
     bounds = [[south, west], [north, east]]
 
     ds = None
-
     return arr, gt, proj, width, height, bounds
 
 
@@ -184,6 +184,37 @@ def write_geotiff(path, array_mm, gt, proj):
     ds = None
 
     return path
+
+
+def print_waxahachie_debug(accumulator, ref_gt):
+    lat = 32.36170
+    lon = -96.89100
+
+    west = ref_gt[0]
+    north = ref_gt[3]
+    xres = ref_gt[1]
+    yres = abs(ref_gt[5])
+
+    col = int((lon - west) / xres)
+    row = int((north - lat) / yres)
+
+    height, width = accumulator.shape
+
+    print("WAXAHACHIE DEBUG")
+    print("shape:", accumulator.shape)
+    print("row:", row)
+    print("col:", col)
+
+    if row < 0 or row >= height or col < 0 or col >= width:
+        print("Waxahachie point is outside raster bounds")
+        return
+
+    test_mm = float(accumulator[row, col])
+    test_rgba = mm_to_rgba(np.array([[test_mm]], dtype=np.float32))[0, 0].tolist()
+
+    print("mm:", test_mm)
+    print("inches:", test_mm / 25.4)
+    print("rgba:", test_rgba)
 
 
 def main():
@@ -260,14 +291,19 @@ def main():
         max_mm = float(np.nanmax(accumulator))
         max_inches = max_mm / 25.4
 
+        print("Accumulator shape:", accumulator.shape)
+        print("Accumulator min:", float(np.nanmin(accumulator)))
+        print("Accumulator max:", max_mm)
+
         combined_tif_path = os.path.join(tmpdir, "combined_42h.tif")
         write_geotiff(combined_tif_path, accumulator, ref_gt, ref_proj)
 
         png_bytes = array_to_png_bytes(accumulator)
 
+        print_waxahachie_debug(accumulator, ref_gt)
+
         with open(combined_tif_path, "rb") as f:
             tif_bytes = f.read()
-            png_bytes = array_to_png_bytes(accumulator)
 
         image_url = upload_bytes(
             s3,
@@ -288,8 +324,8 @@ def main():
         end_time = hrrr_records[-1].get("valid_time_utc")
 
         payload = {
-            "product_name": "42-Hour Flood Outlook Accumulation",
-            "product_id": "combined_42h",
+            "product_name": PRODUCT_NAME,
+            "product_id": PRODUCT_ID,
             "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "observed_hours": len(mrms_records),
             "forecast_hours": len(hrrr_records),
@@ -306,7 +342,7 @@ def main():
             "sources": ["MRMS observed", "HRRR forecast"],
             "note": "Combined accumulation uses latest 24 MRMS observed GeoTIFFs plus first 18 HRRR forecast GeoTIFFs. HRRR rasters are reprojected/resampled to the MRMS reference grid before summing.",
         }
-      
+
         index_url = upload_bytes(
             s3,
             "combined/accum/index.json",
@@ -323,28 +359,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# Debug Waxahachie pixel
-lat = 32.3361
-lon = -96.9525
-
-west = bounds[0][1]
-south = bounds[0][0]
-north = bounds[1][0]
-east = bounds[1][1]
-
-height, width = accumulator.shape
-
-col = int((lon - west) / (east - west) * width)
-row = int((north - lat) / (north - south) * height)
-
-test_mm = float(accumulator[row, col])
-test_rgba = mm_to_rgba(np.array([[test_mm]], dtype=np.float32))[0, 0].tolist()
-
-print("WAXAHACHIE DEBUG")
-print("bounds:", bounds)
-print("shape:", accumulator.shape)
-print("row/col:", row, col)
-print("mm:", test_mm)
-print("inches:", test_mm / 25.4)
-print("rgba:", test_rgba)
