@@ -443,23 +443,18 @@ def build_accumulations(
 
         print_accum_debug(tag, accum_mm)
 
-native_tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}_native.tif")
-display_tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}.tif")
+        native_tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}_native.tif")
+        display_tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}.tif")
 
-# Write native HRRR accumulation first
-write_array_to_geotiff(accum_mm, native_tif_path, geotransform, projection)
+        write_array_to_geotiff(accum_mm, native_tif_path, geotransform, projection)
+        warp_to_display_grid(native_tif_path, display_tif_path)
 
-# Warp to EPSG:4326 display grid
-warp_to_display_grid(native_tif_path, display_tif_path)
+        display_mm, display_bounds, display_gt, display_projection = geotiff_to_array(display_tif_path)
 
-# Read the warped/display GeoTIFF back into an array
-display_mm, display_bounds, display_gt, display_projection = geotiff_to_array(display_tif_path)
+        png_bytes = array_to_png_bytes(display_mm)
 
-# Build PNG from the SAME warped/display array used in the uploaded GeoTIFF
-png_bytes = array_to_png_bytes(display_mm)
-
-tif_path = display_tif_path
-bounds = display_bounds
+        tif_path = display_tif_path
+        bounds = display_bounds
 
         with open(tif_path, "rb") as f:
             tif_bytes = f.read()
@@ -470,7 +465,7 @@ bounds = display_bounds
         png_url = version_url(png_url_raw)
         tif_url = version_url(tif_url_raw)
 
-        max_mm = float(np.nanmax(accum_mm))
+        max_mm = float(np.nanmax(display_mm))
         max_inches = max_mm / 25.4
 
         record = {
@@ -479,7 +474,7 @@ bounds = display_bounds
             "end_valid_time_utc": selected_records[-1]["valid_time_utc"],
             "image_url": png_url,
             "geotiff_url": tif_url,
-            "bounds": bounds,
+            "bounds": display_bounds,
             "units": "mm",
             "max_rainfall_mm": round(max_mm, 3),
             "max_rainfall_inches": round(max_inches, 3),
@@ -492,6 +487,7 @@ bounds = display_bounds
         print(f"Accum {tag} TIF → {tif_url}")
 
     return accum_records
+
 
 
 def main():
