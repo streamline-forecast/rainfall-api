@@ -330,6 +330,15 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
 
             cumulative_mm, bounds, geotransform, projection = geotiff_to_array(cumulative_tif_path)
 
+            print("HRRR projection:")
+print(projection)
+
+print("HRRR geotransform:")
+print(geotransform)
+
+print("HRRR bounds:")
+print(bounds)
+
             if previous_cumulative is None:
                 hourly_mm = cumulative_mm
             else:
@@ -434,10 +443,23 @@ def build_accumulations(
 
         print_accum_debug(tag, accum_mm)
 
-        png_bytes = array_to_png_bytes(accum_mm)
+native_tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}_native.tif")
+display_tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}.tif")
 
-        tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}.tif")
-        write_array_to_geotiff(accum_mm, tif_path, geotransform, projection)
+# Write native HRRR accumulation first
+write_array_to_geotiff(accum_mm, native_tif_path, geotransform, projection)
+
+# Warp to EPSG:4326 display grid
+warp_to_display_grid(native_tif_path, display_tif_path)
+
+# Read the warped/display GeoTIFF back into an array
+display_mm, display_bounds, display_gt, display_projection = geotiff_to_array(display_tif_path)
+
+# Build PNG from the SAME warped/display array used in the uploaded GeoTIFF
+png_bytes = array_to_png_bytes(display_mm)
+
+tif_path = display_tif_path
+bounds = display_bounds
 
         with open(tif_path, "rb") as f:
             tif_bytes = f.read()
