@@ -86,7 +86,7 @@ def upload_bytes(s3, key, data, content_type):
         Key=key,
         Body=data,
         ContentType=content_type,
-        CacheControl="public, max-age=3600",
+        CacheControl="no-cache, no-store, must-revalidate",
     )
     return f"{R2_PUBLIC_BASE_URL}/{key}"
 
@@ -267,6 +267,7 @@ def main():
 
         with open(combined_tif_path, "rb") as f:
             tif_bytes = f.read()
+            png_bytes = array_to_png_bytes(accumulator)
 
         image_url = upload_bytes(
             s3,
@@ -322,3 +323,28 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Debug Waxahachie pixel
+lat = 32.3361
+lon = -96.9525
+
+west = bounds[0][1]
+south = bounds[0][0]
+north = bounds[1][0]
+east = bounds[1][1]
+
+height, width = accumulator.shape
+
+col = int((lon - west) / (east - west) * width)
+row = int((north - lat) / (north - south) * height)
+
+test_mm = float(accumulator[row, col])
+test_rgba = mm_to_rgba(np.array([[test_mm]], dtype=np.float32))[0, 0].tolist()
+
+print("WAXAHACHIE DEBUG")
+print("bounds:", bounds)
+print("shape:", accumulator.shape)
+print("row/col:", row, col)
+print("mm:", test_mm)
+print("inches:", test_mm / 25.4)
+print("rgba:", test_rgba)
