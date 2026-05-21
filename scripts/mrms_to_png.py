@@ -186,14 +186,6 @@ def geotiff_to_array(tiff_path):
     bounds = [[south, west], [north, east]]
     return data, bounds, gt, projection
     
-print("MRMS projection:")
-print(projection)
-
-print("MRMS geotransform:")
-print(geotransform)
-
-print("MRMS bounds:")
-print(bounds)
 
 def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
     from osgeo import gdal
@@ -355,6 +347,15 @@ def main():
             grib2_to_geotiff(grib2_path, tiff_path)
 
             data_mm, bounds, geotransform, projection = geotiff_to_array(tiff_path)
+
+            print("MRMS projection:")
+            print(projection)
+
+            print("MRMS geotransform:")
+            print(geotransform)
+
+            print("MRMS bounds:")
+            print(bounds)
 
             hourly_arrays.append(data_mm)
             latest_bounds = bounds
