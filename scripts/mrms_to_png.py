@@ -66,7 +66,7 @@ def upload_bytes(s3, key, data, content_type):
         Key=key,
         Body=data,
         ContentType=content_type,
-        CacheControl="public, max-age=3600",
+        CacheControl="no-cache, no-store, must-revalidate",
     )
     return f"{R2_PUBLIC_BASE_URL}/{key}"
 
@@ -177,14 +177,14 @@ def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
 
 def array_to_png_bytes(data_mm):
     rgba = mm_to_rgba(data_mm)
+
     img = Image.fromarray(rgba, mode="RGBA")
 
-    w, h = img.size
-    if w > 2000:
-        img = img.resize((w // 4, h // 4), Image.LANCZOS)
+    print("PNG native dimensions:", img.size)
 
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
+
     return buf.getvalue()
 
 
