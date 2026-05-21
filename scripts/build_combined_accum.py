@@ -105,13 +105,12 @@ def mm_to_rgba(data_mm):
 
 def array_to_png_bytes(data_mm):
     rgba = mm_to_rgba(data_mm)
-    img = Image.fromarray(rgba, mode="RGBA")
 
-# Keep native resolution
-pass
+    img = Image.fromarray(rgba, mode="RGBA")
 
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
+
     return buf.getvalue()
 
 
