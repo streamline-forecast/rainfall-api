@@ -275,7 +275,28 @@ def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
     ds = None
 
     return output_path
+    
+def warp_to_display_grid(src_path, dst_path):
+    from osgeo import gdal
 
+    options = gdal.WarpOptions(
+        format="GTiff",
+        dstSRS="EPSG:4326",
+        outputBounds=(-130.0, 20.0, -60.0, 55.0),
+        width=7000,
+        height=3500,
+        resampleAlg="bilinear",
+        srcNodata=0,
+        dstNodata=0,
+    )
+
+    ds = gdal.Warp(dst_path, src_path, options=options)
+
+    if ds is None:
+        raise RuntimeError(f"Failed to warp raster to display grid: {src_path}")
+
+    ds = None
+    return dst_path
 
 def valid_time(cycle_dt, fhour):
     return cycle_dt + datetime.timedelta(hours=fhour)
