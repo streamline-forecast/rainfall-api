@@ -32,15 +32,12 @@ R2_ENDPOINT_URL = os.environ["R2_ENDPOINT_URL"].rstrip("/")
 RUN_VERSION = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
 
 COLORMAP_MM = [
-    (0.0, (0, 0, 0, 0)),              # No rain / transparent
-    (0.254, (186, 224, 255, 160)),    # 0.01–0.25 in Light Total
-    (6.35, (120, 170, 255, 175)),     # 0.25–0.50 in Minor Total
-    (12.7, (70, 95, 220, 190)),       # 0.50–1.00 in Moderate Total
-    (25.4, (125, 70, 210, 205)),      # 1.00–2.00 in Heavy Total
-    (50.8, (205, 70, 190, 220)),      # 2.00–4.00 in Very Heavy Total
-    (101.6, (210, 60, 85, 235)),      # 4.00–8.00 in Extreme Total
-    (203.2, (100, 0, 0, 255)),        # >8.00 in Exceptional Total
-    (float("inf"), (100, 0, 0, 255)),
+    (0.0, (0, 255, 0, 255)),          # BRIGHT GREEN
+    (0.254, (0, 255, 0, 255)),        # BRIGHT GREEN
+    (6.35, (0, 0, 255, 255)),
+    (12.7, (255, 255, 0, 255)),
+    (25.4, (255, 0, 255, 255)),
+    (float("inf"), (255, 0, 0, 255)),
 ]
 
 
