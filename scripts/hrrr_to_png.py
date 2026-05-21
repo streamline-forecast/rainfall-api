@@ -490,6 +490,18 @@ def build_accumulations(
 
         png_bytes = array_to_png_bytes(display_mm)
 
+        if tag == "18h":
+        test_row = 2251
+        test_col = 3284
+        test_mm = float(display_mm[test_row, test_col])
+        test_rgba = mm_to_rgba(np.array([[test_mm]], dtype=np.float32))[0, 0].tolist()
+
+        print("HRRR 18H PIXEL DEBUG")
+        print("row/col:", test_row, test_col)
+        print("display_mm:", test_mm)
+        print("inches:", test_mm / 25.4)
+        print("expected_rgba:", test_rgba)
+
         with open(tif_path, "rb") as f:
             tif_bytes = f.read()
 
