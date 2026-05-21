@@ -105,22 +105,44 @@ def find_latest_filenames(n=NUM_HOURS):
     return latest
 
 
-def download_and_decompress(filename, tmpdir):
+def download_and_decompress(filename, tmpdir, max_attempts=5):
     url = MRMS_BASE_URL + filename
     gz_path = os.path.join(tmpdir, filename)
     grib2_path = gz_path[:-3]
 
-    print(f"  Downloading {filename} …")
-    with urllib.request.urlopen(url, timeout=120) as resp:
-        with open(gz_path, "wb") as f:
-            f.write(resp.read())
+    for attempt in range(1, max_attempts + 1):
+        try:
+            print(f"  Downloading {filename} attempt {attempt}/{max_attempts} …")
 
-    with gzip.open(gz_path, "rb") as gz_in, open(grib2_path, "wb") as out:
-        out.write(gz_in.read())
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 GitHubActions-RainfallPipeline/1.0",
+                    "Accept": "*/*",
+                },
+            )
 
-    os.remove(gz_path)
-    print(f"    {os.path.getsize(grib2_path):,} bytes (.grib2)")
-    return grib2_path
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                with open(gz_path, "wb") as f:
+                    f.write(resp.read())
+
+            with gzip.open(gz_path, "rb") as gz_in, open(grib2_path, "wb") as out:
+                out.write(gz_in.read())
+
+            if os.path.exists(gz_path):
+                os.remove(gz_path)
+
+            print(f"    {os.path.getsize(grib2_path):,} bytes (.grib2)")
+            return grib2_path
+
+        except Exception as e:
+            print(f"    WARNING: download failed for {filename}: {e}")
+
+            if attempt == max_attempts:
+                raise
+
+            import time
+            time.sleep(10 * attempt)
 
 
 def grib2_to_geotiff(grib2_path, tiff_path):
