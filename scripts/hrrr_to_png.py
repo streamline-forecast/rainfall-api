@@ -340,8 +340,6 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             print(bounds)
 
             if previous_cumulative is None:
-
-            if previous_cumulative is None:
                 hourly_mm = cumulative_mm
             else:
                 hourly_mm = cumulative_mm - previous_cumulative
