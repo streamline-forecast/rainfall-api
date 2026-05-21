@@ -392,8 +392,8 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             with open(apcp_grib_path, "rb") as f:
                 grib_bytes = f.read()
 
-            png_key = f"hrrr/forecast/accum/png/accum_{tag}_{RUN_VERSION}.png"
-            tif_key = f"hrrr/forecast/accum/geotiff/accum_{tag}_{RUN_VERSION}.tif"
+            png_key = f"hrrr/forecast/png/hrrr_f{fhour:02d}.png"
+            tif_key = f"hrrr/forecast/geotiff/hrrr_f{fhour:02d}.tif"
             grib_key = f"hrrr/forecast/grib2/hrrr_f{fhour:02d}_apcp.grib2"
 
             png_url_raw = upload_bytes(s3, png_key, png_bytes, "image/png")
@@ -471,8 +471,8 @@ def build_accumulations(
         accum_mm = np.sum(selected_arrays, axis=0).astype(np.float32)
 
         tag = f"{duration:02d}h"
-        png_key = f"hrrr/forecast/accum/png/accum_{tag}.png"
-        tif_key = f"hrrr/forecast/accum/geotiff/accum_{tag}.tif"
+        png_key = f"hrrr/forecast/accum/png/accum_{tag}_{RUN_VERSION}.png"
+        tif_key = f"hrrr/forecast/accum/geotiff/accum_{tag}_{RUN_VERSION}.tif"
 
         print_accum_debug(tag, accum_mm)
 
