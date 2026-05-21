@@ -369,15 +369,25 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
 
             previous_cumulative = cumulative_mm.copy()
 
-            write_array_to_geotiff(hourly_mm, hourly_tif_path, geotransform, projection)
+native_hourly_tif_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}_native.tif")
+display_hourly_tif_path = hourly_tif_path
 
-            png_bytes = array_to_png_bytes(hourly_mm)
+write_array_to_geotiff(hourly_mm, native_hourly_tif_path, geotransform, projection)
 
-            with open(hourly_tif_path, "rb") as f:
-                tif_bytes = f.read()
+print(f"Warping HRRR F{fhour:02d} hourly to EPSG:4326 display grid")
+warp_to_display_grid(native_hourly_tif_path, display_hourly_tif_path)
 
-            with open(apcp_grib_path, "rb") as f:
-                grib_bytes = f.read()
+display_hourly_mm, display_bounds, display_gt, display_projection = geotiff_to_array(display_hourly_tif_path)
+
+print("DISPLAY hourly projection:")
+print(display_projection)
+print("DISPLAY hourly bounds:")
+print(display_bounds)
+
+png_bytes = array_to_png_bytes(display_hourly_mm)
+
+with open(display_hourly_tif_path, "rb") as f:
+    tif_bytes = f.read()
 
             png_key = f"hrrr/forecast/png/hrrr_f{fhour:02d}.png"
             tif_key = f"hrrr/forecast/geotiff/hrrr_f{fhour:02d}.tif"
@@ -391,7 +401,7 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             tif_url = version_url(tif_url_raw)
             grib_url_public = version_url(grib_url_raw)
 
-            vmax_mm = float(np.nanmax(hourly_mm))
+vmax_mm = float(np.nanmax(display_hourly_mm))
             vmax_inches = vmax_mm / 25.4
 
             record = {
@@ -401,7 +411,7 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
                 "image_url": png_url,
                 "geotiff_url": tif_url,
                 "grib2_url": grib_url_public,
-                "bounds": bounds,
+                "bounds": display_bounds,
                 "units": "mm",
                 "hourly_max_mm": round(vmax_mm, 3),
                 "hourly_max_inches": round(vmax_inches, 3),
@@ -412,11 +422,10 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             }
 
             forecast_records.append(record)
-            hourly_arrays.append(hourly_mm)
-
-            latest_bounds = bounds
-            latest_geotransform = geotransform
-            latest_projection = projection
+hourly_arrays.append(display_hourly_mm)
+latest_bounds = display_bounds
+latest_geotransform = display_gt
+latest_projection = display_projection
 
             print(f"PNG → {png_url}")
             print(f"TIF → {tif_url}")
@@ -464,18 +473,19 @@ def build_accumulations(
 
         print_accum_debug(tag, accum_mm)
 
-        native_tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}_native.tif")
-        display_tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}.tif")
+        tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}.tif")
 
-        write_array_to_geotiff(accum_mm, native_tif_path, geotransform, projection)
-        warp_to_display_grid(native_tif_path, display_tif_path)
+        write_array_to_geotiff(accum_mm, tif_path, geotransform, projection)
 
-        display_mm, display_bounds, display_gt, display_projection = geotiff_to_array(display_tif_path)
+        # hourly_arrays are already warped to EPSG:4326, so accum_mm is already display-grid aligned.
+        display_mm, display_bounds, display_gt, display_projection = geotiff_to_array(tif_path)
+
+        print("DISPLAY accumulation projection:")
+        print(display_projection)
+        print("DISPLAY accumulation bounds:")
+        print(display_bounds)
 
         png_bytes = array_to_png_bytes(display_mm)
-
-        tif_path = display_tif_path
-        bounds = display_bounds
 
         with open(tif_path, "rb") as f:
             tif_bytes = f.read()
@@ -508,7 +518,6 @@ def build_accumulations(
         print(f"Accum {tag} TIF → {tif_url}")
 
     return accum_records
-
 
 
 def main():
