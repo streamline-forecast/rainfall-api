@@ -26,6 +26,8 @@ R2_BUCKET_NAME = os.environ["R2_BUCKET_NAME"]
 R2_PUBLIC_BASE_URL = os.environ["R2_PUBLIC_BASE_URL"].rstrip("/")
 R2_ENDPOINT_URL = os.environ["R2_ENDPOINT_URL"].rstrip("/")
 
+RUN_VERSION = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
+
 COLORMAP_MM = [
     (0.0, (0, 0, 0, 0)),
     (0.254, (100, 200, 255, 160)),
@@ -39,13 +41,22 @@ COLORMAP_MM = [
 ]
 
 
+def version_url(url):
+    return f"{url}?v={RUN_VERSION}"
+
+
 def mm_to_rgba(data_mm):
     h, w = data_mm.shape
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
+
+    valid = np.isfinite(data_mm) & (data_mm >= 0) & (data_mm < 2000)
+
     for i in range(len(COLORMAP_MM) - 1):
         lo, color = COLORMAP_MM[i]
         hi, _ = COLORMAP_MM[i + 1]
-        rgba[(data_mm >= lo) & (data_mm < hi)] = color
+        mask = valid & (data_mm >= lo) & (data_mm < hi)
+        rgba[mask] = color
+
     return rgba
 
 
@@ -177,7 +188,6 @@ def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
 
 def array_to_png_bytes(data_mm):
     rgba = mm_to_rgba(data_mm)
-
     img = Image.fromarray(rgba, mode="RGBA")
 
     print("PNG native dimensions:", img.size)
@@ -206,6 +216,17 @@ def parse_timestamp(filename):
     return dt.isoformat()
 
 
+def print_accum_debug(duration_tag, accum_mm):
+    max_mm = float(np.nanmax(accum_mm))
+    min_mm = float(np.nanmin(accum_mm))
+
+    print(f"DEBUG accum_{duration_tag}")
+    print("  shape:", accum_mm.shape)
+    print("  min_mm:", min_mm)
+    print("  max_mm:", max_mm)
+    print("  max_inches:", max_mm / 25.4)
+
+
 def build_accumulations(s3, hourly_arrays, hourly_index, geotransform, projection, bounds, tmpdir):
     accum_index = []
 
@@ -223,6 +244,8 @@ def build_accumulations(s3, hourly_arrays, hourly_index, geotransform, projectio
         png_key = f"mrms/accum/png/accum_{duration_tag}.png"
         tif_key = f"mrms/accum/geotiff/accum_{duration_tag}.tif"
 
+        print_accum_debug(duration_tag, accum_mm)
+
         png_bytes = array_to_png_bytes(accum_mm)
 
         accum_tif_path = os.path.join(tmpdir, f"accum_{duration_tag}.tif")
@@ -231,8 +254,11 @@ def build_accumulations(s3, hourly_arrays, hourly_index, geotransform, projectio
         with open(accum_tif_path, "rb") as f:
             tif_bytes = f.read()
 
-        png_url = upload_bytes(s3, png_key, png_bytes, "image/png")
-        tif_url = upload_bytes(s3, tif_key, tif_bytes, "image/tiff")
+        png_url_raw = upload_bytes(s3, png_key, png_bytes, "image/png")
+        tif_url_raw = upload_bytes(s3, tif_key, tif_bytes, "image/tiff")
+
+        png_url = version_url(png_url_raw)
+        tif_url = version_url(tif_url_raw)
 
         max_mm = float(np.nanmax(accum_mm))
         max_inches = max_mm / 25.4
@@ -248,6 +274,7 @@ def build_accumulations(s3, hourly_arrays, hourly_index, geotransform, projectio
             "max_rainfall_mm": round(max_mm, 3),
             "max_rainfall_inches": round(max_inches, 3),
             "product": f"MRMS_{MRMS_PRODUCT}",
+            "version": RUN_VERSION,
         }
 
         accum_index.append(record)
@@ -257,22 +284,27 @@ def build_accumulations(s3, hourly_arrays, hourly_index, geotransform, projectio
 
     payload = {
         "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "version": RUN_VERSION,
         "durations": ACCUM_DURATIONS,
         "files": accum_index,
     }
 
-    index_url = upload_bytes(
+    index_url_raw = upload_bytes(
         s3,
         "mrms/accum/index.json",
         json.dumps(payload, indent=2).encode(),
         "application/json",
     )
 
+    index_url = version_url(index_url_raw)
+
     print(f"  Accum index → {index_url}")
     return index_url
 
 
 def main():
+    print("RUN_VERSION:", RUN_VERSION)
+
     s3 = make_s3()
     filenames = find_latest_filenames(NUM_HOURS)
 
@@ -311,9 +343,13 @@ def main():
             tif_key = f"mrms/hourly/geotiff/mrms_{tag}.tif"
             grib2_key = f"mrms/hourly/grib2/mrms_{tag}.grib2"
 
-            png_url = upload_bytes(s3, png_key, png_bytes, "image/png")
-            tif_url = upload_bytes(s3, tif_key, tiff_bytes, "image/tiff")
-            grib2_url = upload_bytes(s3, grib2_key, grib2_bytes, "application/octet-stream")
+            png_url_raw = upload_bytes(s3, png_key, png_bytes, "image/png")
+            tif_url_raw = upload_bytes(s3, tif_key, tiff_bytes, "image/tiff")
+            grib2_url_raw = upload_bytes(s3, grib2_key, grib2_bytes, "application/octet-stream")
+
+            png_url = version_url(png_url_raw)
+            tif_url = version_url(tif_url_raw)
+            grib2_url = version_url(grib2_url_raw)
 
             ts = parse_timestamp(filename)
 
@@ -328,6 +364,7 @@ def main():
                 "accumulation_hours": 1,
                 "product": f"MRMS_{MRMS_PRODUCT}",
                 "units": "mm",
+                "version": RUN_VERSION,
             }
 
             hourly_index.append(record)
@@ -342,19 +379,22 @@ def main():
 
         hourly_payload = {
             "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "version": RUN_VERSION,
             "num_hours": len(hourly_index),
             "files": hourly_index,
         }
 
-        hourly_index_url = upload_bytes(
+        hourly_index_url_raw = upload_bytes(
             s3,
             "mrms/hourly/index.json",
             json.dumps(hourly_payload, indent=2).encode(),
             "application/json",
         )
 
+        hourly_index_url = version_url(hourly_index_url_raw)
+
         print("\n=== Building accumulation rasters ===")
-        build_accumulations(
+        accum_index_url = build_accumulations(
             s3=s3,
             hourly_arrays=hourly_arrays,
             hourly_index=hourly_index,
@@ -366,8 +406,8 @@ def main():
 
     print("\n=== MRMS archive complete ===")
     print(f"  Hourly index: {hourly_index_url}")
-    print(f"  Accum index : {R2_PUBLIC_BASE_URL}/mrms/accum/index.json")
-    print(f"  Latest PNG  : {R2_PUBLIC_BASE_URL}/mrms_latest.png")
+    print(f"  Accum index : {accum_index_url}")
+    print(f"  Latest PNG  : {R2_PUBLIC_BASE_URL}/mrms_latest.png?v={RUN_VERSION}")
     print(f"  Hours       : {len(hourly_index)}")
 
 
