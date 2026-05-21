@@ -107,9 +107,8 @@ def array_to_png_bytes(data_mm):
     rgba = mm_to_rgba(data_mm)
     img = Image.fromarray(rgba, mode="RGBA")
 
-    w, h = img.size
-    if w > 2200:
-        img = img.resize((w // 4, h // 4), Image.LANCZOS)
+# Keep native resolution
+pass
 
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
