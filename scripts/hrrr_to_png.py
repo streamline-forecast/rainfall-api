@@ -331,13 +331,15 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             cumulative_mm, bounds, geotransform, projection = geotiff_to_array(cumulative_tif_path)
 
             print("HRRR projection:")
-print(projection)
+            print(projection)
 
-print("HRRR geotransform:")
-print(geotransform)
+            print("HRRR geotransform:")
+            print(geotransform)
 
-print("HRRR bounds:")
-print(bounds)
+            print("HRRR bounds:")
+            print(bounds)
+
+            if previous_cumulative is None:
 
             if previous_cumulative is None:
                 hourly_mm = cumulative_mm
