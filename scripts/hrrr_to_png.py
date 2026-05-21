@@ -404,7 +404,7 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             tif_url = version_url(tif_url_raw)
             grib_url_public = version_url(grib_url_raw)
 
-vmax_mm = float(np.nanmax(display_hourly_mm))
+            vmax_mm = float(np.nanmax(display_hourly_mm))
             vmax_inches = vmax_mm / 25.4
 
             record = {
@@ -425,10 +425,10 @@ vmax_mm = float(np.nanmax(display_hourly_mm))
             }
 
             forecast_records.append(record)
-hourly_arrays.append(display_hourly_mm)
-latest_bounds = display_bounds
-latest_geotransform = display_gt
-latest_projection = display_projection
+            hourly_arrays.append(display_hourly_mm)
+            latest_bounds = display_bounds
+            latest_geotransform = display_gt
+            latest_projection = display_projection
 
             print(f"PNG → {png_url}")
             print(f"TIF → {tif_url}")
