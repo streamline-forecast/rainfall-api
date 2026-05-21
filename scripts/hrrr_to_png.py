@@ -29,6 +29,8 @@ R2_BUCKET_NAME = os.environ["R2_BUCKET_NAME"]
 R2_PUBLIC_BASE_URL = os.environ["R2_PUBLIC_BASE_URL"].rstrip("/")
 R2_ENDPOINT_URL = os.environ["R2_ENDPOINT_URL"].rstrip("/")
 
+RUN_VERSION = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
+
 COLORMAP_MM = [
     (0.0, (0, 0, 0, 0)),
     (0.254, (100, 200, 255, 160)),
@@ -40,6 +42,10 @@ COLORMAP_MM = [
     (101.6, (180, 10, 10, 245)),
     (float("inf"), (100, 0, 0, 255)),
 ]
+
+
+def version_url(url):
+    return f"{url}?v={RUN_VERSION}"
 
 
 def make_s3():
@@ -68,10 +74,13 @@ def mm_to_rgba(data_mm):
     h, w = data_mm.shape
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
 
+    valid = np.isfinite(data_mm) & (data_mm >= 0) & (data_mm < 2000)
+
     for i in range(len(COLORMAP_MM) - 1):
         lo, color = COLORMAP_MM[i]
         hi, _ = COLORMAP_MM[i + 1]
-        rgba[(data_mm >= lo) & (data_mm < hi)] = color
+        mask = valid & (data_mm >= lo) & (data_mm < hi)
+        rgba[mask] = color
 
     return rgba
 
@@ -87,6 +96,7 @@ def array_to_png_bytes(data_mm):
     img.save(buf, "PNG", optimize=True)
 
     return buf.getvalue()
+
 
 def hrrr_urls(cycle_date, cycle_hour, fhour):
     ymd = cycle_date.strftime("%Y%m%d")
@@ -271,6 +281,17 @@ def valid_time(cycle_dt, fhour):
     return cycle_dt + datetime.timedelta(hours=fhour)
 
 
+def print_accum_debug(tag, accum_mm):
+    max_mm = float(np.nanmax(accum_mm))
+    min_mm = float(np.nanmin(accum_mm))
+
+    print(f"DEBUG HRRR accum_{tag}")
+    print("  shape:", accum_mm.shape)
+    print("  min_mm:", min_mm)
+    print("  max_mm:", max_mm)
+    print("  max_inches:", max_mm / 25.4)
+
+
 def process_hrrr_forecast(s3, cycle_dt, tmpdir):
     forecast_records = []
     hourly_arrays = []
@@ -332,9 +353,13 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             tif_key = f"hrrr/forecast/geotiff/hrrr_f{fhour:02d}.tif"
             grib_key = f"hrrr/forecast/grib2/hrrr_f{fhour:02d}_apcp.grib2"
 
-            png_url = upload_bytes(s3, png_key, png_bytes, "image/png")
-            tif_url = upload_bytes(s3, tif_key, tif_bytes, "image/tiff")
-            grib_url_public = upload_bytes(s3, grib_key, grib_bytes, "application/octet-stream")
+            png_url_raw = upload_bytes(s3, png_key, png_bytes, "image/png")
+            tif_url_raw = upload_bytes(s3, tif_key, tif_bytes, "image/tiff")
+            grib_url_raw = upload_bytes(s3, grib_key, grib_bytes, "application/octet-stream")
+
+            png_url = version_url(png_url_raw)
+            tif_url = version_url(tif_url_raw)
+            grib_url_public = version_url(grib_url_raw)
 
             vmax_mm = float(np.nanmax(hourly_mm))
             vmax_inches = vmax_mm / 25.4
@@ -353,6 +378,7 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
                 "source_grib_url": grib_url,
                 "source_idx_url": idx_url,
                 "apcp_idx_line": apcp["line"],
+                "version": RUN_VERSION,
             }
 
             forecast_records.append(record)
@@ -406,6 +432,8 @@ def build_accumulations(
         png_key = f"hrrr/forecast/accum/png/accum_{tag}.png"
         tif_key = f"hrrr/forecast/accum/geotiff/accum_{tag}.tif"
 
+        print_accum_debug(tag, accum_mm)
+
         png_bytes = array_to_png_bytes(accum_mm)
 
         tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}.tif")
@@ -414,8 +442,11 @@ def build_accumulations(
         with open(tif_path, "rb") as f:
             tif_bytes = f.read()
 
-        png_url = upload_bytes(s3, png_key, png_bytes, "image/png")
-        tif_url = upload_bytes(s3, tif_key, tif_bytes, "image/tiff")
+        png_url_raw = upload_bytes(s3, png_key, png_bytes, "image/png")
+        tif_url_raw = upload_bytes(s3, tif_key, tif_bytes, "image/tiff")
+
+        png_url = version_url(png_url_raw)
+        tif_url = version_url(tif_url_raw)
 
         max_mm = float(np.nanmax(accum_mm))
         max_inches = max_mm / 25.4
@@ -430,6 +461,7 @@ def build_accumulations(
             "units": "mm",
             "max_rainfall_mm": round(max_mm, 3),
             "max_rainfall_inches": round(max_inches, 3),
+            "version": RUN_VERSION,
         }
 
         accum_records.append(record)
@@ -441,6 +473,8 @@ def build_accumulations(
 
 
 def main():
+    print("RUN_VERSION:", RUN_VERSION)
+
     s3 = make_s3()
     cycle_dt = choose_latest_cycle()
 
@@ -466,17 +500,20 @@ def main():
     index_payload = {
         "cycle_time_utc": cycle_dt.isoformat(),
         "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "version": RUN_VERSION,
         "source": "NOAA HRRR AWS Open Data",
         "forecast_hours": forecast_records,
         "accumulations": accum_records,
     }
 
-    index_url = upload_bytes(
+    index_url_raw = upload_bytes(
         s3,
         "hrrr/forecast/index.json",
         json.dumps(index_payload, indent=2).encode(),
         "application/json",
     )
+
+    index_url = version_url(index_url_raw)
 
     print("\n=== HRRR forecast pipeline complete ===")
     print(f"Index URL: {index_url}")
