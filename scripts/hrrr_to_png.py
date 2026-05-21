@@ -369,25 +369,28 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
 
             previous_cumulative = cumulative_mm.copy()
 
-native_hourly_tif_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}_native.tif")
-display_hourly_tif_path = hourly_tif_path
+            native_hourly_tif_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}_native.tif")
+            display_hourly_tif_path = hourly_tif_path
 
-write_array_to_geotiff(hourly_mm, native_hourly_tif_path, geotransform, projection)
+            write_array_to_geotiff(hourly_mm, native_hourly_tif_path, geotransform, projection)
 
-print(f"Warping HRRR F{fhour:02d} hourly to EPSG:4326 display grid")
-warp_to_display_grid(native_hourly_tif_path, display_hourly_tif_path)
+            print(f"Warping HRRR F{fhour:02d} hourly to EPSG:4326 display grid")
+            warp_to_display_grid(native_hourly_tif_path, display_hourly_tif_path)
 
-display_hourly_mm, display_bounds, display_gt, display_projection = geotiff_to_array(display_hourly_tif_path)
+            display_hourly_mm, display_bounds, display_gt, display_projection = geotiff_to_array(display_hourly_tif_path)
 
-print("DISPLAY hourly projection:")
-print(display_projection)
-print("DISPLAY hourly bounds:")
-print(display_bounds)
+            print("DISPLAY hourly projection:")
+            print(display_projection)
+            print("DISPLAY hourly bounds:")
+            print(display_bounds)
 
-png_bytes = array_to_png_bytes(display_hourly_mm)
+            png_bytes = array_to_png_bytes(display_hourly_mm)
 
-with open(display_hourly_tif_path, "rb") as f:
-    tif_bytes = f.read()
+            with open(display_hourly_tif_path, "rb") as f:
+                tif_bytes = f.read()
+
+            with open(apcp_grib_path, "rb") as f:
+                grib_bytes = f.read()
 
             png_key = f"hrrr/forecast/png/hrrr_f{fhour:02d}.png"
             tif_key = f"hrrr/forecast/geotiff/hrrr_f{fhour:02d}.tif"
