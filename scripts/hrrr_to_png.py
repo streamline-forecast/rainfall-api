@@ -359,6 +359,19 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             )
 
             grib2_to_geotiff(apcp_grib_path, cumulative_tif_path)
+            if fhour == 6:
+    with open(cumulative_tif_path, "rb") as f:
+        native_cumulative_bytes = f.read()
+
+    native_key = f"hrrr/debug/native/hrrr_f{fhour:02d}_cumulative_native_{RUN_VERSION}.tif"
+    native_url = upload_bytes(
+        s3,
+        native_key,
+        native_cumulative_bytes,
+        "image/tiff"
+    )
+
+    print(f"NATIVE CUMULATIVE DEBUG TIF → {native_url}")
 
             cumulative_mm, native_bounds, native_gt, native_projection = geotiff_to_array(cumulative_tif_path)
 
