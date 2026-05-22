@@ -437,7 +437,15 @@ def main():
 
             png_bytes = array_to_png_bytes(data_mm)
 
-            with open(tiff_path, "rb") as f:
+            corrected_hourly_tif_path = os.path.join(tmpdir, f"mrms_{seq:02d}_corrected.tif")
+
+            write_array_to_geotiff(
+                data_mm,
+                corrected_hourly_tif_path,
+                bounds,
+            )
+
+            with open(corrected_hourly_tif_path, "rb") as f:
                 tiff_bytes = f.read()
 
             with open(grib2_path, "rb") as f:
