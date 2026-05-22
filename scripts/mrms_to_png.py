@@ -187,16 +187,10 @@ def geotiff_to_array(tiff_path):
     return data, bounds, gt, projection
     
 
-def write_array_to_geotiff(array_mm, output_path, bounds):
-    from osgeo import gdal, osr
+def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
+    from osgeo import gdal
 
     rows, cols = array_mm.shape
-
-    south, west = bounds[0]
-    north, east = bounds[1]
-
-    xres = (east - west) / cols
-    yres = (north - south) / rows
 
     driver = gdal.GetDriverByName("GTiff")
     ds = driver.Create(
@@ -207,6 +201,19 @@ def write_array_to_geotiff(array_mm, output_path, bounds):
         gdal.GDT_Float32,
         options=["COMPRESS=LZW", "TILED=YES"],
     )
+
+    ds.SetGeoTransform(geotransform)
+    ds.SetProjection(projection)
+
+    band = ds.GetRasterBand(1)
+    band.WriteArray(array_mm.astype(np.float32))
+    band.SetNoDataValue(-9999.0)
+    band.FlushCache()
+
+    ds.FlushCache()
+    ds = None
+
+    return output_path
 
     # Traditional raster geotransform:
     # X = longitude, Y = latitude
@@ -219,14 +226,10 @@ def write_array_to_geotiff(array_mm, output_path, bounds):
         -yres,
     ])
 
-    srs = osr.SpatialReference()
-    srs.ImportFromEPSG(4326)
 
     # Critical: force traditional GIS axis order lon/lat.
     srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
 
-    # Critical: WKT1 avoids EPSG:4326 lat/long axis-order weirdness.
-    ds.SetProjection(srs.ExportToWkt(["FORMAT=WKT1_GDAL"]))
 
     band = ds.GetRasterBand(1)
     band.WriteArray(array_mm.astype(np.float32))
@@ -315,7 +318,12 @@ def build_accumulations(s3, hourly_arrays, hourly_index, geotransform, projectio
         png_bytes = array_to_png_bytes(accum_mm)
 
         accum_tif_path = os.path.join(tmpdir, f"accum_{duration_tag}.tif")
-        write_array_to_geotiff(accum_mm, accum_tif_path, bounds)
+        write_array_to_geotiff(
+            accum_mm,
+            accum_tif_path,
+            geotransform,
+            projection
+        )
 
         with open(accum_tif_path, "rb") as f:
             tif_bytes = f.read()
