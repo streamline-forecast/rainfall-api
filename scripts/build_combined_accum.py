@@ -367,7 +367,7 @@ def main():
             "end_time_utc": end_time,
             "image_url": image_url,
             "geotiff_url": geotiff_url,
-            "bounds": png_bounds,
+            "bounds": bounds,
             "sample_bounds": bounds,
             "units": "mm",
             "max_rainfall_mm": round(max_mm, 3),
