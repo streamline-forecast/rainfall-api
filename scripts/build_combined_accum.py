@@ -326,10 +326,11 @@ def main():
             display_png_tif_path,
         )
 
-        png_mm, png_bounds, png_gt, png_projection = geotiff_to_array(display_png_tif_path)
+        png_mm, png_gt, png_projection, png_width, png_height, png_bounds = read_raster_array(
+            display_png_tif_path
+        )
 
         png_bytes = array_to_png_bytes(png_mm)
-        
 
         print_waxahachie_debug(accumulator, ref_gt)
 
