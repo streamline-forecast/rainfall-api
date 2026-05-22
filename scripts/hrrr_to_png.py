@@ -188,8 +188,11 @@ def parse_idx_for_apcp(idx_text):
     if not apcp_records:
         raise RuntimeError("No APCP surface record found in HRRR idx file.")
 
-    return apcp_records[-1]
+    print("APCP RECORDS FOUND:")
+    for r in apcp_records:
+        print(r["line"])
 
+    return apcp_records[-1]
 
 def download_byte_range(url, byte_start, byte_end, output_path, max_attempts=5):
     import time
