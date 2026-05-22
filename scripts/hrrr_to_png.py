@@ -278,7 +278,7 @@ def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
 
     band = ds.GetRasterBand(1)
     band.WriteArray(array_mm.astype(np.float32))
-    band.SetNoDataValue(0.0)
+    band.SetNoDataValue(-9999.0)
     band.FlushCache()
 
     ds.FlushCache()
@@ -293,10 +293,10 @@ def warp_to_epsg4326(src_path, dst_path):
     options = gdal.WarpOptions(
         format="GTiff",
         dstSRS="EPSG:4326",
-        resampleAlg="bilinear",
-        srcNodata=0,
-        dstNodata=0,
+        resampleAlg="near",
+        errorThreshold=0.0,
         multithread=True,
+        creationOptions=["COMPRESS=LZW", "TILED=YES"],
     )
 
     ds = gdal.Warp(dst_path, src_path, options=options)
@@ -307,7 +307,6 @@ def warp_to_epsg4326(src_path, dst_path):
     ds.FlushCache()
     ds = None
     return dst_path
-
 
 def valid_time(cycle_dt, fhour):
     return cycle_dt + datetime.timedelta(hours=fhour)
