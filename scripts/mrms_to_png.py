@@ -185,8 +185,29 @@ def geotiff_to_array(tiff_path):
 
     bounds = [[south, west], [north, east]]
     return data, bounds, gt, projection
-    
 
+
+def warp_to_web_mercator(src_path, dst_path):
+    from osgeo import gdal
+
+    options = gdal.WarpOptions(
+        format="GTiff",
+        dstSRS="EPSG:3857",
+        resampleAlg="near",
+        errorThreshold=0.0,
+        multithread=True,
+        creationOptions=["COMPRESS=LZW", "TILED=YES"],
+    )
+
+    ds = gdal.Warp(dst_path, src_path, options=options)
+
+    if ds is None:
+        raise RuntimeError(f"Failed to warp MRMS PNG raster to EPSG:3857: {src_path}")
+
+    ds.FlushCache()
+    ds = None
+    return dst_path
+    
 def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
     from osgeo import gdal
 
@@ -315,15 +336,15 @@ def build_accumulations(s3, hourly_arrays, hourly_index, geotransform, projectio
         print("MRMS ACCUM shape:")
         print(accum_mm.shape)
     
-        png_bytes = array_to_png_bytes(accum_mm)
-
         accum_tif_path = os.path.join(tmpdir, f"accum_{duration_tag}.tif")
-        write_array_to_geotiff(
-            accum_mm,
-            accum_tif_path,
-            geotransform,
-            projection
-        )
+        write_array_to_geotiff(accum_mm, accum_tif_path, geotransform, projection)
+
+        # PNG is generated from Web Mercator raster for Leaflet display
+        png_display_tif_path = os.path.join(tmpdir, f"accum_{duration_tag}_png3857.tif")
+        warp_to_web_mercator(accum_tif_path, png_display_tif_path)
+
+        png_mm, png_bounds, png_gt, png_projection = geotiff_to_array(png_display_tif_path)
+        png_bytes = array_to_png_bytes(png_mm)
 
         with open(accum_tif_path, "rb") as f:
             tif_bytes = f.read()
