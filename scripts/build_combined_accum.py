@@ -145,6 +145,28 @@ def read_raster_array(path):
     return arr, gt, proj, width, height, bounds
 
 
+def warp_to_web_mercator(src_path, dst_path):
+    options = gdal.WarpOptions(
+        format="GTiff",
+        dstSRS="EPSG:3857",
+        resampleAlg="near",
+        errorThreshold=0.0,
+        multithread=True,
+        creationOptions=["COMPRESS=LZW", "TILED=YES"],
+    )
+
+    ds = gdal.Warp(dst_path, src_path, options=options)
+
+    if ds is None:
+        raise RuntimeError(
+            f"Failed to warp raster to EPSG:3857: {src_path}"
+        )
+
+    ds.FlushCache()
+    ds = None
+
+    return dst_path
+
 def reproject_to_reference(src_path, dst_path, ref_gt, ref_proj, ref_width, ref_height):
     minx = ref_gt[0]
     maxy = ref_gt[3]
