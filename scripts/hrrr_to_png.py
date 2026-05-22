@@ -485,6 +485,21 @@ def build_accumulations(
         print("DISPLAY accumulation bounds:")
         print(display_bounds)
 
+        if tag == "06h":
+            test_row = 2360
+            test_col = 3298
+
+            test_mm = float(display_mm[test_row, test_col])
+            test_rgba = mm_to_rgba(
+                np.array([[test_mm]], dtype=np.float32)
+            )[0, 0].tolist()
+
+            print("HRRR 06H PNG/TIF VALIDATION")
+            print("row/col:", test_row, test_col)
+            print("value_mm:", test_mm)
+            print("inches:", test_mm / 25.4)
+            print("rgba:", test_rgba)
+
         png_bytes = array_to_png_bytes(display_mm)
 
         if tag == "18h":
