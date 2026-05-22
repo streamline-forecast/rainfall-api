@@ -268,6 +268,18 @@ def build_accumulations(s3, hourly_arrays, hourly_index, geotransform, projectio
 
         print_accum_debug(duration_tag, accum_mm)
 
+        print("MRMS ACCUM projection:")
+        print(projection)
+
+        print("MRMS ACCUM geotransform:")
+        print(geotransform)
+
+        print("MRMS ACCUM bounds:")
+        print(bounds)
+
+        print("MRMS ACCUM shape:")
+        print(accum_mm.shape)
+    
         png_bytes = array_to_png_bytes(accum_mm)
 
         accum_tif_path = os.path.join(tmpdir, f"accum_{duration_tag}.tif")
