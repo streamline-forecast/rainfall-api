@@ -461,7 +461,7 @@ def main():
             write_array_to_geotiff(
                 data_mm,
                 corrected_hourly_tif_path,
-                bounds,
+                bounds=bounds,
             )
 
             with open(corrected_hourly_tif_path, "rb") as f:
