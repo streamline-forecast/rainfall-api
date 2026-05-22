@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 
 import os
-import re
 import io
 import json
 import tempfile
 import datetime
-import subprocess
 import urllib.request
-import urllib.error
+import subprocess
 
 import numpy as np
 from PIL import Image
 import boto3
 from botocore.config import Config
-
 
 HRRR_BUCKET_BASE = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com"
 DOMAIN = "conus"
@@ -32,12 +29,15 @@ R2_ENDPOINT_URL = os.environ["R2_ENDPOINT_URL"].rstrip("/")
 RUN_VERSION = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
 
 COLORMAP_MM = [
-    (0.0, (0, 255, 0, 255)),          # BRIGHT GREEN
-    (0.254, (0, 255, 0, 255)),        # BRIGHT GREEN
-    (6.35, (0, 0, 255, 255)),
-    (12.7, (255, 255, 0, 255)),
-    (25.4, (255, 0, 255, 255)),
-    (float("inf"), (255, 0, 0, 255)),
+    (0.0, (0, 0, 0, 0)),
+    (0.254, (186, 224, 255, 160)),
+    (6.35, (120, 170, 255, 175)),
+    (12.7, (70, 95, 220, 190)),
+    (25.4, (125, 70, 210, 205)),
+    (50.8, (205, 70, 190, 220)),
+    (101.6, (210, 60, 85, 235)),
+    (203.2, (100, 0, 0, 255)),
+    (float("inf"), (100, 0, 0, 255)),
 ]
 
 
@@ -70,7 +70,6 @@ def upload_bytes(s3, key, data, content_type):
 def mm_to_rgba(data_mm):
     h, w = data_mm.shape
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
-
     valid = np.isfinite(data_mm) & (data_mm >= 0) & (data_mm < 2000)
 
     for i in range(len(COLORMAP_MM) - 1):
@@ -84,14 +83,12 @@ def mm_to_rgba(data_mm):
 
 def array_to_png_bytes(data_mm):
     rgba = mm_to_rgba(data_mm)
-
     img = Image.fromarray(rgba, mode="RGBA")
 
     print("PNG native dimensions:", img.size)
 
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
-
     return buf.getvalue()
 
 
@@ -124,10 +121,7 @@ def choose_latest_cycle():
 
     for back in range(0, 8):
         dt = candidate - datetime.timedelta(hours=back)
-        cycle_date = dt.date()
-        cycle_hour = dt.hour
-
-        _, idx_url = hrrr_urls(cycle_date, cycle_hour, 1)
+        _, idx_url = hrrr_urls(dt.date(), dt.hour, 1)
 
         print(f"Checking HRRR cycle {dt.isoformat()} → {idx_url}")
 
@@ -138,9 +132,25 @@ def choose_latest_cycle():
     raise RuntimeError("No available HRRR cycle found in the last 8 hours.")
 
 
-def fetch_text(url):
-    with urllib.request.urlopen(url, timeout=30) as resp:
-        return resp.read().decode("utf-8", errors="ignore")
+def fetch_text(url, max_attempts=5):
+    import time
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 GitHubActions-HRRR-Pipeline/1.0",
+                    "Accept": "text/plain,*/*",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return resp.read().decode("utf-8", errors="ignore")
+        except Exception as e:
+            print(f"WARNING: fetch_text failed attempt {attempt}/{max_attempts}: {e}")
+            if attempt == max_attempts:
+                raise
+            time.sleep(10 * attempt)
 
 
 def parse_idx_for_apcp(idx_text):
@@ -158,20 +168,14 @@ def parse_idx_for_apcp(idx_text):
         except ValueError:
             continue
 
-        variable = parts[3] if len(parts) > 3 else ""
-        level = parts[4] if len(parts) > 4 else ""
-        timing = ":".join(parts[5:]) if len(parts) > 5 else ""
-
-        records.append(
-            {
-                "record_number": record_number,
-                "byte_start": byte_start,
-                "variable": variable,
-                "level": level,
-                "timing": timing,
-                "line": line,
-            }
-        )
+        records.append({
+            "record_number": record_number,
+            "byte_start": byte_start,
+            "variable": parts[3] if len(parts) > 3 else "",
+            "level": parts[4] if len(parts) > 4 else "",
+            "timing": ":".join(parts[5:]) if len(parts) > 5 else "",
+            "line": line,
+        })
 
     for i, rec in enumerate(records):
         rec["byte_end"] = records[i + 1]["byte_start"] - 1 if i + 1 < len(records) else None
@@ -187,24 +191,33 @@ def parse_idx_for_apcp(idx_text):
     return apcp_records[-1]
 
 
-def download_byte_range(url, byte_start, byte_end, output_path):
-    headers = {}
+def download_byte_range(url, byte_start, byte_end, output_path, max_attempts=5):
+    import time
 
-    if byte_end is not None:
-        headers["Range"] = f"bytes={byte_start}-{byte_end}"
-    else:
-        headers["Range"] = f"bytes={byte_start}-"
+    for attempt in range(1, max_attempts + 1):
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 GitHubActions-HRRR-Pipeline/1.0",
+                "Accept": "application/octet-stream,*/*",
+                "Range": f"bytes={byte_start}-{byte_end}" if byte_end is not None else f"bytes={byte_start}-",
+            }
 
-    req = urllib.request.Request(url, headers=headers)
+            req = urllib.request.Request(url, headers=headers)
 
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = resp.read()
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                data = resp.read()
 
-    with open(output_path, "wb") as f:
-        f.write(data)
+            with open(output_path, "wb") as f:
+                f.write(data)
 
-    print(f"Downloaded byte range to {output_path}: {len(data):,} bytes")
-    return output_path
+            print(f"Downloaded byte range to {output_path}: {len(data):,} bytes")
+            return output_path
+
+        except Exception as e:
+            print(f"WARNING: download_byte_range failed attempt {attempt}/{max_attempts}: {e}")
+            if attempt == max_attempts:
+                raise
+            time.sleep(10 * attempt)
 
 
 def grib2_to_geotiff(grib2_path, tiff_path):
@@ -272,27 +285,29 @@ def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
     ds = None
 
     return output_path
-    
-def warp_to_display_grid(src_path, dst_path):
+
+
+def warp_to_epsg4326(src_path, dst_path):
     from osgeo import gdal
 
     options = gdal.WarpOptions(
         format="GTiff",
         dstSRS="EPSG:4326",
-        xRes=0.01,
-        yRes=0.01,
         resampleAlg="bilinear",
         srcNodata=0,
         dstNodata=0,
+        multithread=True,
     )
 
     ds = gdal.Warp(dst_path, src_path, options=options)
 
     if ds is None:
-        raise RuntimeError(f"Failed to warp raster to display grid: {src_path}")
+        raise RuntimeError(f"Failed to warp raster to EPSG:4326: {src_path}")
 
+    ds.FlushCache()
     ds = None
     return dst_path
+
 
 def valid_time(cycle_dt, fhour):
     return cycle_dt + datetime.timedelta(hours=fhour)
@@ -331,8 +346,9 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             apcp = parse_idx_for_apcp(idx_text)
 
             apcp_grib_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}_apcp.grib2")
-            cumulative_tif_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}_cumulative.tif")
-            hourly_tif_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}.tif")
+            cumulative_tif_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}_cumulative_native.tif")
+            native_hourly_tif_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}_hourly_native.tif")
+            display_hourly_tif_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}.tif")
 
             print(f"APCP idx line: {apcp['line']}")
 
@@ -345,38 +361,29 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
 
             grib2_to_geotiff(apcp_grib_path, cumulative_tif_path)
 
-            cumulative_mm, bounds, geotransform, projection = geotiff_to_array(cumulative_tif_path)
-
-            print("HRRR projection:")
-            print(projection)
-
-            print("HRRR geotransform:")
-            print(geotransform)
-
-            print("HRRR bounds:")
-            print(bounds)
+            cumulative_mm, native_bounds, native_gt, native_projection = geotiff_to_array(cumulative_tif_path)
 
             if previous_cumulative is None:
-                hourly_mm = cumulative_mm
+                hourly_native_mm = cumulative_mm
             else:
-                hourly_mm = cumulative_mm - previous_cumulative
-                hourly_mm[hourly_mm < 0] = 0.0
-                hourly_mm[np.isnan(hourly_mm)] = 0.0
+                hourly_native_mm = cumulative_mm - previous_cumulative
+                hourly_native_mm[hourly_native_mm < 0] = 0.0
+                hourly_native_mm[np.isnan(hourly_native_mm)] = 0.0
 
             previous_cumulative = cumulative_mm.copy()
 
-            native_hourly_tif_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}_native.tif")
-            display_hourly_tif_path = hourly_tif_path
+            write_array_to_geotiff(
+                hourly_native_mm,
+                native_hourly_tif_path,
+                native_gt,
+                native_projection,
+            )
 
-            write_array_to_geotiff(hourly_mm, native_hourly_tif_path, geotransform, projection)
-
-            print(f"Warping HRRR F{fhour:02d} hourly to EPSG:4326 display grid")
-            warp_to_display_grid(native_hourly_tif_path, display_hourly_tif_path)
+            print(f"Warping HRRR F{fhour:02d} hourly to EPSG:4326")
+            warp_to_epsg4326(native_hourly_tif_path, display_hourly_tif_path)
 
             display_hourly_mm, display_bounds, display_gt, display_projection = geotiff_to_array(display_hourly_tif_path)
 
-            print("DISPLAY hourly projection:")
-            print(display_projection)
             print("DISPLAY hourly bounds:")
             print(display_bounds)
 
@@ -388,9 +395,9 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             with open(apcp_grib_path, "rb") as f:
                 grib_bytes = f.read()
 
-            png_key = f"hrrr/forecast/png/hrrr_f{fhour:02d}.png"
-            tif_key = f"hrrr/forecast/geotiff/hrrr_f{fhour:02d}.tif"
-            grib_key = f"hrrr/forecast/grib2/hrrr_f{fhour:02d}_apcp.grib2"
+            png_key = f"hrrr/forecast/png/hrrr_f{fhour:02d}_{RUN_VERSION}.png"
+            tif_key = f"hrrr/forecast/geotiff/hrrr_f{fhour:02d}_{RUN_VERSION}.tif"
+            grib_key = f"hrrr/forecast/grib2/hrrr_f{fhour:02d}_apcp_{RUN_VERSION}.grib2"
 
             png_url_raw = upload_bytes(s3, png_key, png_bytes, "image/png")
             tif_url_raw = upload_bytes(s3, tif_key, tif_bytes, "image/tiff")
@@ -422,6 +429,7 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
 
             forecast_records.append(record)
             hourly_arrays.append(display_hourly_mm)
+
             latest_bounds = display_bounds
             latest_geotransform = display_gt
             latest_projection = display_projection
@@ -474,48 +482,19 @@ def build_accumulations(
 
         tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}.tif")
 
-        write_array_to_geotiff(accum_mm, tif_path, geotransform, projection)
+        write_array_to_geotiff(
+            accum_mm,
+            tif_path,
+            geotransform,
+            projection,
+        )
 
-        # hourly_arrays are already warped to EPSG:4326, so accum_mm is already display-grid aligned.
         display_mm, display_bounds, display_gt, display_projection = geotiff_to_array(tif_path)
 
-        print("DISPLAY accumulation projection:")
-        print(display_projection)
         print("DISPLAY accumulation bounds:")
         print(display_bounds)
 
-        if tag == "06h":
-            test_row = 2360
-            test_col = 3298
-
-            test_mm = float(display_mm[test_row, test_col])
-            test_rgba = mm_to_rgba(
-                np.array([[test_mm]], dtype=np.float32)
-            )[0, 0].tolist()
-
-            print("HRRR 06H PNG/TIF VALIDATION")
-            print("row/col:", test_row, test_col)
-            print("value_mm:", test_mm)
-            print("inches:", test_mm / 25.4)
-            print("rgba:", test_rgba)
-
         png_bytes = array_to_png_bytes(display_mm)
-
-        if tag == "18h":
-            test_row = 2251
-            test_col = 3284
-
-            test_mm = float(display_mm[test_row, test_col])
-
-            test_rgba = mm_to_rgba(
-                np.array([[test_mm]], dtype=np.float32)
-            )[0, 0].tolist()
-
-            print("HRRR 18H PIXEL DEBUG")
-            print("row/col:", test_row, test_col)
-            print("display_mm:", test_mm)
-            print("inches:", test_mm / 25.4)
-            print("expected_rgba:", test_rgba)
 
         with open(tif_path, "rb") as f:
             tif_bytes = f.read()
@@ -587,7 +566,7 @@ def main():
     index_url_raw = upload_bytes(
         s3,
         "hrrr/forecast/index.json",
-        json.dumps(index_payload, indent=2).encode(),
+        json.dumps(index_payload, indent=2).encode("utf-8"),
         "application/json",
     )
 
