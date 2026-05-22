@@ -187,23 +187,36 @@ def geotiff_to_array(tiff_path):
     return data, bounds, gt, projection
     
 
-def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
-    from osgeo import gdal
+def write_array_to_geotiff(array_mm, output_path, bounds):
+    from osgeo import gdal, osr
 
     rows, cols = array_mm.shape
+
+    south, west = bounds[0]
+    north, east = bounds[1]
+
+    xres = (east - west) / cols
+    yres = (north - south) / rows
+
     driver = gdal.GetDriverByName("GTiff")
     ds = driver.Create(output_path, cols, rows, 1, gdal.GDT_Float32)
 
-    ds.SetGeoTransform(geotransform)
-    from osgeo import osr
+    ds.SetGeoTransform([
+        west,
+        xres,
+        0,
+        north,
+        0,
+        -yres,
+    ])
 
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(4326)
     ds.SetProjection(srs.ExportToWkt())
 
     band = ds.GetRasterBand(1)
-    band.WriteArray(array_mm.astype(np.float32))
-    band.SetNoDataValue(0.0)
+    band.WriteArray(array_mm.astype("float32"))
+    band.SetNoDataValue(-9999.0)
     band.FlushCache()
 
     ds.FlushCache()
@@ -287,7 +300,7 @@ def build_accumulations(s3, hourly_arrays, hourly_index, geotransform, projectio
         png_bytes = array_to_png_bytes(accum_mm)
 
         accum_tif_path = os.path.join(tmpdir, f"accum_{duration_tag}.tif")
-        write_array_to_geotiff(accum_mm, accum_tif_path, geotransform, projection)
+        write_array_to_geotiff(accum_mm, accum_tif_path, bounds)
 
         with open(accum_tif_path, "rb") as f:
             tif_bytes = f.read()
