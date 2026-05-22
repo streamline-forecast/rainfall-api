@@ -208,8 +208,9 @@ def warp_to_web_mercator(src_path, dst_path):
     ds = None
     return dst_path
     
-def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
-    from osgeo import gdal
+def write_array_to_geotiff(array_mm, output_path, geotransform=None, projection=None, bounds=None):
+    from osgeo import gdal, osr
+    import numpy as np
 
     rows, cols = array_mm.shape
 
@@ -223,8 +224,26 @@ def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
         options=["COMPRESS=LZW", "TILED=YES"],
     )
 
-    ds.SetGeoTransform(geotransform)
-    ds.SetProjection(projection)
+    if bounds is not None:
+        south, west = bounds[0]
+        north, east = bounds[1]
+
+        xres = (east - west) / cols
+        yres = (north - south) / rows
+
+        ds.SetGeoTransform([west, xres, 0, north, 0, -yres])
+
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(4326)
+        srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        ds.SetProjection(srs.ExportToWkt(["FORMAT=WKT1_GDAL"]))
+
+    else:
+        if geotransform is None or projection is None:
+            raise ValueError("Must provide either bounds OR geotransform + projection")
+
+        ds.SetGeoTransform(geotransform)
+        ds.SetProjection(projection)
 
     band = ds.GetRasterBand(1)
     band.WriteArray(array_mm.astype(np.float32))
