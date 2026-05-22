@@ -195,7 +195,11 @@ def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
     ds = driver.Create(output_path, cols, rows, 1, gdal.GDT_Float32)
 
     ds.SetGeoTransform(geotransform)
-    ds.SetProjection(projection)
+    from osgeo import osr
+
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    ds.SetProjection(srs.ExportToWkt())
 
     band = ds.GetRasterBand(1)
     band.WriteArray(array_mm.astype(np.float32))
