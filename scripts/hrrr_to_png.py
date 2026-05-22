@@ -311,6 +311,27 @@ def warp_to_epsg4326(src_path, dst_path):
     ds = None
     return dst_path
 
+def warp_to_web_mercator(src_path, dst_path):
+    from osgeo import gdal
+
+    options = gdal.WarpOptions(
+        format="GTiff",
+        dstSRS="EPSG:3857",
+        resampleAlg="near",
+        errorThreshold=0.0,
+        multithread=True,
+        creationOptions=["COMPRESS=LZW", "TILED=YES"],
+    )
+
+    ds = gdal.Warp(dst_path, src_path, options=options)
+
+    if ds is None:
+        raise RuntimeError(f"Failed to warp raster to EPSG:3857: {src_path}")
+
+    ds.FlushCache()
+    ds = None
+    return dst_path
+
 def valid_time(cycle_dt, fhour):
     return cycle_dt + datetime.timedelta(hours=fhour)
 
@@ -513,7 +534,16 @@ def build_accumulations(
         print("DISPLAY accumulation bounds:")
         print(display_bounds)
 
-        png_bytes = array_to_png_bytes(display_mm)
+        # Build PNG from Web Mercator version for Leaflet display
+        webmerc_tif_path = os.path.join(tmpdir, f"hrrr_accum_{tag}_3857.tif")
+        warp_to_web_mercator(tif_path, webmerc_tif_path)
+
+        webmerc_mm, webmerc_bounds, webmerc_gt, webmerc_projection = geotiff_to_array(webmerc_tif_path)
+
+        print("WEB MERCATOR accumulation bounds:")
+        print(webmerc_bounds)
+
+        png_bytes = array_to_png_bytes(webmerc_mm)
 
         with open(tif_path, "rb") as f:
             tif_bytes = f.read()
