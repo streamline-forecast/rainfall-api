@@ -454,8 +454,6 @@ def main():
             latest_geotransform = geotransform
             latest_projection = projection
 
-            png_bytes = array_to_png_bytes(data_mm)
-
             corrected_hourly_tif_path = os.path.join(tmpdir, f"mrms_{seq:02d}_corrected.tif")
 
             write_array_to_geotiff(
@@ -463,6 +461,23 @@ def main():
                 corrected_hourly_tif_path,
                 bounds=bounds,
             )
+
+            # SAME DISPLAY PATH AS ACCUMULATIONS
+            png_display_tif_path = os.path.join(tmpdir, f"mrms_{seq:02d}_png3857.tif")
+
+            warp_to_web_mercator(
+                corrected_hourly_tif_path,
+                png_display_tif_path,
+            )
+
+            png_mm, png_bounds, png_gt, png_projection = geotiff_to_array(
+                png_display_tif_path
+            )
+
+            print("MRMS HOURLY PNG WEBMERC bounds:")
+            print(png_bounds)
+
+            png_bytes = array_to_png_bytes(png_mm)
 
             with open(corrected_hourly_tif_path, "rb") as f:
                 tiff_bytes = f.read()
