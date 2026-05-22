@@ -199,8 +199,17 @@ def write_array_to_geotiff(array_mm, output_path, bounds):
     yres = (north - south) / rows
 
     driver = gdal.GetDriverByName("GTiff")
-    ds = driver.Create(output_path, cols, rows, 1, gdal.GDT_Float32)
+    ds = driver.Create(
+        output_path,
+        cols,
+        rows,
+        1,
+        gdal.GDT_Float32,
+        options=["COMPRESS=LZW", "TILED=YES"],
+    )
 
+    # Traditional raster geotransform:
+    # X = longitude, Y = latitude
     ds.SetGeoTransform([
         west,
         xres,
@@ -212,10 +221,17 @@ def write_array_to_geotiff(array_mm, output_path, bounds):
 
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(4326)
-    ds.SetProjection(srs.ExportToWkt())
+
+    # Critical: force traditional GIS axis order lon/lat.
+    srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+    # Critical: WKT1 avoids EPSG:4326 lat/long axis-order weirdness.
+    ds.SetProjection(srs.ExportToWkt(["FORMAT=WKT1_GDAL"]))
 
     band = ds.GetRasterBand(1)
-    band.WriteArray(array_mm.astype("float32"))
+    band.WriteArray(array_mm.astype(np.float32))
+
+    # 0.0 is valid rainfall. Do not use 0 as nodata.
     band.SetNoDataValue(-9999.0)
     band.FlushCache()
 
@@ -223,7 +239,6 @@ def write_array_to_geotiff(array_mm, output_path, bounds):
     ds = None
 
     return output_path
-
 
 def array_to_png_bytes(data_mm):
     rgba = mm_to_rgba(data_mm)
