@@ -297,6 +297,17 @@ def main():
         combined_tif_path = os.path.join(tmpdir, "combined_42h.tif")
         write_geotiff(combined_tif_path, accumulator, ref_gt, ref_proj)
 
+        display_png_tif_path = os.path.join(tmpdir, "combined_42h_png3857.tif")
+
+        warp_to_web_mercator(
+            combined_tif_path,
+            display_png_tif_path,
+        )
+
+        png_mm, png_bounds, png_gt, png_projection = geotiff_to_array(display_png_tif_path)
+
+        png_bytes = array_to_png_bytes(png_mm)
+        
         png_bytes = array_to_png_bytes(accumulator)
 
         print_waxahachie_debug(accumulator, ref_gt)
@@ -332,9 +343,10 @@ def main():
             "start_time_utc": start_time,
             "transition_time_utc": transition_time,
             "end_time_utc": end_time,
-            "image_url": image_url,
-            "geotiff_url": geotiff_url,
-            "bounds": bounds,
+            "image_url": png_url,
+            "geotiff_url": tif_url,
+            "bounds": png_bounds,
+            "sample_bounds": geotiff_bounds,
             "units": "mm",
             "max_rainfall_mm": round(max_mm, 3),
             "max_rainfall_inches": round(max_inches, 3),
