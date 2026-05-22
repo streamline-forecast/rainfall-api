@@ -279,9 +279,8 @@ def warp_to_display_grid(src_path, dst_path):
     options = gdal.WarpOptions(
         format="GTiff",
         dstSRS="EPSG:4326",
-        outputBounds=(-134.0, 20.0, -60.0, 55.0),
-        width=7000,
-        height=3500,
+        xRes=0.01,
+        yRes=0.01,
         resampleAlg="bilinear",
         srcNodata=0,
         dstNodata=0,
