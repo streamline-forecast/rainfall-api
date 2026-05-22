@@ -263,8 +263,8 @@ def build_accumulations(s3, hourly_arrays, hourly_index, geotransform, projectio
         accum_mm = np.sum(selected_arrays, axis=0).astype(np.float32)
 
         duration_tag = f"{duration:02d}h"
-        png_key = f"mrms/accum/png/accum_{duration_tag}.png"
-        tif_key = f"mrms/accum/geotiff/accum_{duration_tag}.tif"
+        png_key = f"mrms/accum/png/accum_{duration_tag}_{RUN_VERSION}.png"
+        tif_key = f"mrms/accum/geotiff/accum_{duration_tag}_{RUN_VERSION}.tif"
 
         print_accum_debug(duration_tag, accum_mm)
 
