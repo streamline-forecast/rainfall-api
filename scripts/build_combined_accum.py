@@ -308,7 +308,6 @@ def main():
 
         png_bytes = array_to_png_bytes(png_mm)
         
-        png_bytes = array_to_png_bytes(accumulator)
 
         print_waxahachie_debug(accumulator, ref_gt)
 
@@ -333,26 +332,26 @@ def main():
         transition_time = hrrr_index.get("cycle_time_utc") or mrms_records[-1].get("timestamp_utc")
         end_time = hrrr_records[-1].get("valid_time_utc")
 
-        payload = {
-            "product_name": PRODUCT_NAME,
-            "product_id": PRODUCT_ID,
-            "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "observed_hours": len(mrms_records),
-            "forecast_hours": len(hrrr_records),
-            "total_hours": len(mrms_records) + len(hrrr_records),
-            "start_time_utc": start_time,
-            "transition_time_utc": transition_time,
-            "end_time_utc": end_time,
-            "image_url": png_url,
-            "geotiff_url": tif_url,
-            "bounds": png_bounds,
-            "sample_bounds": geotiff_bounds,
-            "units": "mm",
-            "max_rainfall_mm": round(max_mm, 3),
-            "max_rainfall_inches": round(max_inches, 3),
-            "sources": ["MRMS observed", "HRRR forecast"],
-            "note": "Combined accumulation uses latest 24 MRMS observed GeoTIFFs plus first 18 HRRR forecast GeoTIFFs. HRRR rasters are reprojected/resampled to the MRMS reference grid before summing.",
-        }
+    payload = {
+        "product_name": PRODUCT_NAME,
+        "product_id": PRODUCT_ID,
+        "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "observed_hours": len(mrms_records),
+        "forecast_hours": len(hrrr_records),
+        "total_hours": len(mrms_records) + len(hrrr_records),
+        "start_time_utc": start_time,
+        "transition_time_utc": transition_time,
+        "end_time_utc": end_time,
+        "image_url": image_url,
+        "geotiff_url": geotiff_url,
+        "bounds": png_bounds,
+        "sample_bounds": bounds,
+        "units": "mm",
+        "max_rainfall_mm": round(max_mm, 3),
+        "max_rainfall_inches": round(max_inches, 3),
+        "sources": ["MRMS observed", "HRRR forecast"],
+        "note": "Combined accumulation uses latest 24 MRMS observed GeoTIFFs plus first 18 HRRR forecast GeoTIFFs.",
+    }
 
         index_url = upload_bytes(
             s3,
