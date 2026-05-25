@@ -651,7 +651,7 @@ def build_accumulations(
             "end_valid_time_utc": selected_records[-1]["valid_time_utc"],
             "image_url": png_url,
             "geotiff_url": tif_url,
-            "bounds": png_bounds,
+            "bounds": display_bounds,
             "geotiff_bounds": corrected_bounds,
             "units": "mm",
             "max_rainfall_mm": round(max_mm, 3),
