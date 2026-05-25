@@ -452,17 +452,22 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
                 native_projection,
             )
 
-            extractor_hourly_tif_path = display_hourly_tif_path
+            extractor_hourly_tif_path = os.path.join(
+                tmpdir,
+                f"hrrr_f{fhour:02d}_extractor_4326.tif"
+            )
+
             corrected_hourly_tif_path = os.path.join(
                 tmpdir,
                 f"hrrr_f{fhour:02d}_corrected_extract.tif"
             )
+
             png_display_tif_path = os.path.join(
                 tmpdir,
                 f"hrrr_f{fhour:02d}_png3857.tif"
             )
 
-            print(f"Warping HRRR F{fhour:02d} hourly to EPSG:4326 for extractor")
+            print(f"Warping HRRR F{fhour:02d} hourly to EPSG:4326")
             warp_to_epsg4326(native_hourly_tif_path, extractor_hourly_tif_path)
 
             display_hourly_mm, display_bounds, display_gt, display_projection = geotiff_to_array(
@@ -475,24 +480,24 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
                 display_bounds,
             )
 
-            check_mm, check_bounds, check_gt, check_projection = geotiff_to_array(
+            corrected_mm, corrected_bounds, corrected_gt, corrected_projection = geotiff_to_array(
                 corrected_hourly_tif_path
             )
 
             print("HRRR hourly corrected extractor bounds:")
-            print(check_bounds)
-            print("HRRR hourly corrected extractor geotransform:")
-            print(check_gt)
+            print(corrected_bounds)
+            print("HRRR hourly corrected min/max mm:")
+            print(float(np.nanmin(corrected_mm)), float(np.nanmax(corrected_mm)))
 
-            print(f"Warping HRRR F{fhour:02d} hourly to EPSG:3857 for PNG display")
+            print(f"Warping HRRR F{fhour:02d} corrected hourly to EPSG:3857 for PNG")
             warp_to_web_mercator(corrected_hourly_tif_path, png_display_tif_path)
 
             png_mm, png_bounds, png_gt, png_projection = geotiff_to_array(
                 png_display_tif_path
             )
 
-            print("HRRR hourly PNG WebMerc bounds:")
-            print(png_bounds)
+            print("HRRR hourly PNG min/max mm:")
+            print(float(np.nanmin(png_mm)), float(np.nanmax(png_mm)))
 
             png_bytes = array_to_png_bytes(png_mm)
 
