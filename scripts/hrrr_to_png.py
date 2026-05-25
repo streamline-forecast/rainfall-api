@@ -508,7 +508,7 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             print("PNG SAMPLE VALUE")
             print(float(png_mm[sample_r, sample_c]))
 
-            png_bytes = array_to_png_bytes(corrected_mm)
+            png_bytes = array_to_png_bytes(png_mm)
 
             with open(corrected_hourly_tif_path, "rb") as f:
                 tif_bytes = f.read()
