@@ -419,17 +419,28 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
                 native_projection,
             )
 
-            print(f"Warping HRRR F{fhour:02d} hourly to EPSG:4326")
-            warp_to_epsg4326(native_hourly_tif_path, display_hourly_tif_path)
+            extractor_hourly_tif_path = display_hourly_tif_path
+            png_display_tif_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}_png3857.tif")
 
-            display_hourly_mm, display_bounds, display_gt, display_projection = geotiff_to_array(display_hourly_tif_path)
+            print(f"Warping HRRR F{fhour:02d} hourly to EPSG:4326 for extractor")
+            warp_to_epsg4326(native_hourly_tif_path, extractor_hourly_tif_path)
 
-            print("DISPLAY hourly bounds:")
+            display_hourly_mm, display_bounds, display_gt, display_projection = geotiff_to_array(extractor_hourly_tif_path)
+
+            print("HRRR hourly extractor bounds:")
             print(display_bounds)
 
-            png_bytes = array_to_png_bytes(display_hourly_mm)
+            print(f"Warping HRRR F{fhour:02d} hourly to EPSG:3857 for PNG display")
+            warp_to_web_mercator(extractor_hourly_tif_path, png_display_tif_path)
 
-            with open(display_hourly_tif_path, "rb") as f:
+            png_mm, png_bounds, png_gt, png_projection = geotiff_to_array(png_display_tif_path)
+
+            print("HRRR hourly PNG WebMerc bounds:")
+            print(png_bounds)
+
+            png_bytes = array_to_png_bytes(png_mm)
+
+            with open(extractor_hourly_tif_path, "rb") as f:
                 tif_bytes = f.read()
 
             with open(apcp_grib_path, "rb") as f:
