@@ -645,19 +645,18 @@ def build_accumulations(
         max_mm = float(np.nanmax(display_mm))
         max_inches = max_mm / 25.4
 
-        record = {
-            "duration_hours": duration,
-            "start_valid_time_utc": selected_records[0]["valid_time_utc"],
-            "end_valid_time_utc": selected_records[-1]["valid_time_utc"],
-            "image_url": png_url,
-            "geotiff_url": tif_url,
-            "bounds": display_bounds,
-            "geotiff_bounds": corrected_bounds,
-            "units": "mm",
-            "max_rainfall_mm": round(max_mm, 3),
-            "max_rainfall_inches": round(max_inches, 3),
-            "version": RUN_VERSION,
-        }
+            record = {
+                "duration_hours": duration,
+                "start_valid_time_utc": selected_records[0]["valid_time_utc"],
+                "end_valid_time_utc": selected_records[-1]["valid_time_utc"],
+                "image_url": png_url,
+                "geotiff_url": tif_url,
+                "bounds": display_bounds,
+                "units": "mm",
+                "max_rainfall_mm": round(max_mm, 3),
+                "max_rainfall_inches": round(max_inches, 3),
+                "version": RUN_VERSION,
+            }
 
         accum_records.append(record)
 
