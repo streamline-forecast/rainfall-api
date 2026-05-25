@@ -288,8 +288,41 @@ def write_array_to_geotiff(array_mm, output_path, geotransform, projection):
     ds = None
 
     return output_path
+    
+def write_array_to_geotiff_from_bounds(array_mm, output_path, bounds):
+    from osgeo import gdal, osr
 
+    rows, cols = array_mm.shape
+    south, west = bounds[0]
+    north, east = bounds[1]
 
+    xres = (east - west) / cols
+    yres = (north - south) / rows
+
+    driver = gdal.GetDriverByName("GTiff")
+    ds = driver.Create(
+        output_path,
+        cols,
+        rows,
+        1,
+        gdal.GDT_Float32,
+        options=["COMPRESS=LZW", "TILED=YES"],
+    )
+
+    ds.SetGeoTransform([west, xres, 0, north, 0, -yres])
+
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    ds.SetProjection(srs.ExportToWkt(["FORMAT=WKT1_GDAL"]))
+
+    band = ds.GetRasterBand(1)
+    band.WriteArray(array_mm.astype(np.float32))
+    band.SetNoDataValue(-9999.0)
+    band.FlushCache()
+
+    ds.FlushCache()
+    ds = None
 def warp_to_epsg4326(src_path, dst_path):
     from osgeo import gdal
 
@@ -420,31 +453,55 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             )
 
             extractor_hourly_tif_path = display_hourly_tif_path
-            png_display_tif_path = os.path.join(tmpdir, f"hrrr_f{fhour:02d}_png3857.tif")
+            corrected_hourly_tif_path = os.path.join(
+                tmpdir,
+                f"hrrr_f{fhour:02d}_corrected_extract.tif"
+            )
+            png_display_tif_path = os.path.join(
+                tmpdir,
+                f"hrrr_f{fhour:02d}_png3857.tif"
+            )
 
             print(f"Warping HRRR F{fhour:02d} hourly to EPSG:4326 for extractor")
             warp_to_epsg4326(native_hourly_tif_path, extractor_hourly_tif_path)
 
-            display_hourly_mm, display_bounds, display_gt, display_projection = geotiff_to_array(extractor_hourly_tif_path)
+            display_hourly_mm, display_bounds, display_gt, display_projection = geotiff_to_array(
+                extractor_hourly_tif_path
+            )
 
-            print("HRRR hourly extractor bounds:")
-            print(display_bounds)
+            write_array_to_geotiff_from_bounds(
+                display_hourly_mm,
+                corrected_hourly_tif_path,
+                display_bounds,
+            )
+
+            check_mm, check_bounds, check_gt, check_projection = geotiff_to_array(
+                corrected_hourly_tif_path
+            )
+
+            print("HRRR hourly corrected extractor bounds:")
+            print(check_bounds)
+            print("HRRR hourly corrected extractor geotransform:")
+            print(check_gt)
 
             print(f"Warping HRRR F{fhour:02d} hourly to EPSG:3857 for PNG display")
-            warp_to_web_mercator(extractor_hourly_tif_path, png_display_tif_path)
+            warp_to_web_mercator(corrected_hourly_tif_path, png_display_tif_path)
 
-            png_mm, png_bounds, png_gt, png_projection = geotiff_to_array(png_display_tif_path)
+            png_mm, png_bounds, png_gt, png_projection = geotiff_to_array(
+                png_display_tif_path
+            )
 
             print("HRRR hourly PNG WebMerc bounds:")
             print(png_bounds)
 
             png_bytes = array_to_png_bytes(png_mm)
 
-            with open(extractor_hourly_tif_path, "rb") as f:
+            with open(corrected_hourly_tif_path, "rb") as f:
                 tif_bytes = f.read()
 
             with open(apcp_grib_path, "rb") as f:
                 grib_bytes = f.read()
+
 
             png_key = f"hrrr/forecast/png/hrrr_f{fhour:02d}_{RUN_VERSION}.png"
             tif_key = f"hrrr/forecast/geotiff/hrrr_f{fhour:02d}_{RUN_VERSION}.tif"
