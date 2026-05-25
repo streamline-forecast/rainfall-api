@@ -490,29 +490,34 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
             print(float(np.nanmin(corrected_mm)), float(np.nanmax(corrected_mm)))
 
             print(f"Warping HRRR F{fhour:02d} corrected hourly to EPSG:3857 for PNG")
-            warp_to_web_mercator(corrected_hourly_tif_path, png_display_tif_path)
+            # Build corrected extractor raster
+            write_array_to_geotiff_from_bounds(
+                display_hourly_mm,
+                corrected_hourly_tif_path,
+                display_bounds,
+            )
+
+            corrected_mm, corrected_bounds, corrected_gt, corrected_projection = geotiff_to_array(
+                corrected_hourly_tif_path
+            )
+
+            # Build display PNG from WebMerc version of corrected raster
+            warp_to_web_mercator(
+                corrected_hourly_tif_path,
+                png_display_tif_path
+            )
 
             png_mm, png_bounds, png_gt, png_projection = geotiff_to_array(
                 png_display_tif_path
             )
 
-            print("HRRR hourly PNG min/max mm:")
-            print(float(np.nanmin(png_mm)), float(np.nanmax(png_mm)))
-
-            print("PNG MIN/MAX MM")
-            print(np.nanmin(png_mm), np.nanmax(png_mm))
-
-            sample_r = 635
-            sample_c = 1125
-
-            print("PNG SAMPLE VALUE")
-            print(float(png_mm[sample_r, sample_c]))
-
             png_bytes = array_to_png_bytes(png_mm)
 
+            # Upload extractor GeoTIFF
             with open(corrected_hourly_tif_path, "rb") as f:
                 tif_bytes = f.read()
 
+            # Upload GRIB debug file
             with open(apcp_grib_path, "rb") as f:
                 grib_bytes = f.read()
 
@@ -539,7 +544,8 @@ def process_hrrr_forecast(s3, cycle_dt, tmpdir):
                 "image_url": png_url,
                 "geotiff_url": tif_url,
                 "grib2_url": grib_url_public,
-                "bounds": display_bounds,
+                "bounds": png_bounds,              # Leaflet display PNG bounds
+                "geotiff_bounds": corrected_bounds, # extractor GeoTIFF bounds
                 "units": "mm",
                 "hourly_max_mm": round(vmax_mm, 3),
                 "hourly_max_inches": round(vmax_inches, 3),
@@ -645,7 +651,8 @@ def build_accumulations(
             "end_valid_time_utc": selected_records[-1]["valid_time_utc"],
             "image_url": png_url,
             "geotiff_url": tif_url,
-            "bounds": display_bounds,
+            "bounds": png_bounds,
+            "geotiff_bounds": corrected_bounds,
             "units": "mm",
             "max_rainfall_mm": round(max_mm, 3),
             "max_rainfall_inches": round(max_inches, 3),
